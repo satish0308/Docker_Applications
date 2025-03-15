@@ -1,0 +1,8 @@
+postgres/data/
+downloads/
+downloads_binaries/
+hadoop/
+/downloads/
+venv
+.idea/
+downloads

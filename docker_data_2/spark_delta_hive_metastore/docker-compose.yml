@@ -1,0 +1,131 @@
+services:
+  postgres:
+    image: postgres:13
+    container_name: hive-metastore-postgres
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hiveuser
+      POSTGRES_PASSWORD: hivepassword
+    volumes:
+      - ./postgres/init-hive-metastore.sql:/docker-entrypoint-initdb.d/init-hive-metastore.sql
+      - ./postgres/data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - hadoop-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    volumes:
+      - ./postgres/servers.json:/pgadmin4/servers.json
+      - ./postgres/.pgpass:/pgpass/pgpassfile
+    ports:
+      - "8081:80"
+    depends_on:
+      - postgres
+    networks:
+      - hadoop-network
+
+  namenode:
+    build:
+      context: .
+      dockerfile: hadoop.Dockerfile
+    container_name: namenode
+    hostname: namenode
+    environment:
+      - HDFS_NAMENODE_USER=hdfs
+      - HDFS_DATANODE_USER=hdfs
+      - HDFS_SECONDARYNAMENODE_USER=hdfs
+      - CLUSTER_NAME=hadoop-cluster
+      - HDFS_NAMENODE_USER=root
+      - HADOOP_SSH_OPTS="-o StrictHostKeyChecking=no"
+    volumes:
+      - ./hadoop/namenode/data:/hadoop/dfs/name
+    ports:
+      - "9870:9870" # NameNode Web UI
+      - "9000:9000" # NameNode RPC
+    networks:
+      - hadoop-network
+
+  datanode:
+    build:
+      context: .
+      dockerfile: hadoop.Dockerfile
+    container_name: datanode
+    hostname: datanode
+    environment:
+      - HDFS_NAMENODE_USER=hdfs
+      - HDFS_DATANODE_USER=hdfs
+      - HDFS_SECONDARYNAMENODE_USER=hdfs
+    volumes:
+      - ./hadoop/datanode/data:/hadoop/dfs/data
+    ports:
+      - "9864:9864" # DataNode Web UI
+    networks:
+      - hadoop-network
+
+  hive:
+    build:
+      context: .
+      dockerfile: hive.Dockerfile
+    container_name: hive-server
+    environment:
+      - HDFS_NAMENODE_USER=hdfs
+      - HDFS_DATANODE_USER=hdfs
+      - HDFS_SECONDARYNAMENODE_USER=hdfs
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hiveuser
+      - POSTGRES_PASSWORD=hivepassword
+      - HIVE_CONF_DIR=/home/hive/conf
+    depends_on:
+      - postgres
+      - namenode
+      - datanode
+    ports:
+      - "10000:10000" # HiveServer2
+      - "10002:10002" # Hive Metastore Thrift
+    networks:
+      - hadoop-network
+
+  hue:
+    image: gethue/hue:latest
+    container_name: hue
+    environment:
+      - HUE_CONF_DIR=/hue/desktop/conf
+      - HUE_IGNORE_PASSWORD_SCRIPT_ERRORS=true
+    volumes:
+      - ./hue:/hue/desktop/conf
+    ports:
+      - "8888:8888"
+    depends_on:
+      - hive
+    networks:
+       - hadoop-network
+  spark:
+    build:
+      context: .
+      dockerfile: spark.Dockerfile
+    container_name: spark
+    depends_on:
+      - postgres
+      - namenode
+      - datanode
+    ports:
+      - "4040:4040"
+      - "4041:4041"
+      - "18080:18080"
+      - "5555:5555"
+      - "8080:8080"
+    networks:
+      - hadoop-network
+
+
+
+networks:
+  hadoop-network:
+    driver: bridge

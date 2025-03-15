@@ -1,0 +1,14 @@
+from langchain_community.llms import HuggingFaceEndpoint
+import os
+
+
+os.environ["HUGGINGFACE_ACCESS_TOKEN"] =os.getenv('HF_KEY')
+
+def get_hf_model(model="meta-llama/Meta-Llama-3-8B-Instruct")
+ 	llm_model = HuggingFaceEndpoint(endpoint_url=model,
+     	huggingfacehub_api_token=os.getenv('HF_KEY'),
+     	task="text-generation",
+     	max_new_tokens=512
+	)
+	return llm_model
+ 

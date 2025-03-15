@@ -1,0 +1,21 @@
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    environment:
+      VERSION: "11"
+      USERNAME: "satish"
+      PASSWORD: "satish"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+      - /dev/snd
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - 8006:8006
+      - 3399:3389/tcp
+      - 3399:3389/udp
+    stop_grace_period: 2m
+    volumes:
+      - "/media/satish/New Volume/windows_docker/data/shared:/data"
