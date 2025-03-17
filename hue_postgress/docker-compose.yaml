@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres-metastore
+    restart: always
+    environment:
+      POSTGRES_USER: hiveuser
+      POSTGRES_PASSWORD: hivepassword
+      POSTGRES_DB: metastore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-hive-user.sql:/docker-entrypoint-initdb.d/init-hive-user.sql  # Auto-run SQL script
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveuser -d metastore"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "5432:5432"
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    restart: always
+    command: >
+      /opt/hive/bin/hive --service metastore
+    environment:
+      HIVE_METASTORE_DB_TYPE: postgres
+      HIVE_METASTORE_DB_HOST: postgres-metastore
+      HIVE_METASTORE_DB_NAME: metastore
+      HIVE_METASTORE_DB_USER: hiveuser
+      HIVE_METASTORE_DB_PASSWORD: hivepassword
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "9083:9083"
+    volumes:
+      - hive-metastore-data:/opt/hive/data
+
+  hive-server:
+    image: apache/hive:4.0.0
+    container_name: hive-server
+    restart: always
+    command: >
+      /opt/hive/bin/hiveserver2 --hiveconf hive.metastore.uris=thrift://hive-metastore:9083
+    depends_on:
+      - hive-metastore
+    ports:
+      - "10000:10000"
+    environment:
+      HIVE_SERVER2_THRIFT_PORT: 10000
+      HIVE_METASTORE_URIS: thrift://hive-metastore:9083
+      HIVE_SERVER2_AUTHENTICATION: NOSASL  # Required to match Hue config
+      SERVICE_NAME: hiveserver2
+
+  
+  hue:
+    image: gethue/hue:latest
+    container_name: hue
+    restart: always
+    environment:
+      - HUE_DATABASE_ENGINE=postgresql_psycopg2
+      - HUE_DATABASE_HOST=postgres-metastore
+      - HUE_DATABASE_PORT=5432
+      - HUE_DATABASE_USER=hueuser
+      - HUE_DATABASE_PASSWORD=huepassword
+      - HUE_DATABASE_NAME=huedb
+      - HUE_IGNORE_HIVE_SERVER=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_started
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./hue.ini:/usr/share/hue/desktop/conf/hue.ini
+
+volumes:
+  pgdata:
+  hive-metastore-data:

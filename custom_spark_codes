@@ -1,0 +1,50 @@
+sudo docker compose down --volumes --remove-orphans
+sudo docker rmi -f $(sudo docker images -q)
+sudo docker volume rm $(sudo docker volume ls -q)
+sudo docker network prune -f
+sudo docker system prune -a --volumes -f
+sudo docker compose build --no-cache
+sudo docker compose up -d
+
+
+
+sudo docker exec -it hue bash -c "echo 'import desktop.conf; print(desktop.conf.DATABASE.ENGINE.get())' | /usr/share/hue/build/env/bin/hue shell"
+
+
+
+
+
+
+
+
+
+
+
+
+
+df=spark.read.json("hdfs://namenode:9000/data/yelp/yelpdataset/data/yelp_academic_dataset_user.json")
+df2=df.select('user_id','friends')
+df2.write.csv("hdfs://namenode:9000/data/output")
+
+
+create database if not exists openbeer;
+use openbeer;
+
+create external table if not exists breweries (
+  NUM int,
+  NAME char(100),
+  CITY char(100),
+  STATE char(100),
+  ID int)
+ROW format delimited
+fields terminated by ','
+stored as textfile
+location '/data/openbeer/breweries';
+
+
+
+hdfs dfs -chown sparkuser:supergroup /data
+
+
+spark-submit --driver-cores 1 --executor-cores 2 --num-executors 3  --executor-memory 1500 main.py /home/satish/Downloads/yelp_dataset/yelp_academic_dataset_user.json "/media/satish/New Volume/docker_data_2/spark_delta_hive_metastore/python_scripts/output"
+

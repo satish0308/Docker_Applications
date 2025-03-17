@@ -1,0 +1,20 @@
+version: '3.8'  # Ensure version is specified
+
+services:  
+  hue:
+    image: gethue/hue:latest
+    container_name: std_hue
+    user: "1001:1000"  # Run as hue user instead of root
+    environment:
+      - TMPDIR=/tmp/gunicorn
+      - HUE_CONF_DIR=/hue/desktop/conf
+      - HUE_IGNORE_PASSWORD_SCRIPT_ERRORS=true
+    volumes:
+      - ./hue:/hue/desktop/conf
+      - ./hue/hue.ini:/usr/share/hue/desktop/conf/hue.ini
+    ports:
+      - "88881:8888"
+
+networks:
+  default:
+    driver: bridge

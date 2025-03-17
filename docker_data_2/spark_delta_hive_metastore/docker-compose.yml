@@ -17,18 +17,20 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
+    restart: always
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin
     volumes:
       - ./postgres/servers.json:/pgadmin4/servers.json
-      - ./postgres/.pgpass:/pgpass/pgpassfile
+      - ./postgres/.pgpass:/var/lib/pgadmin/.pgpass  # ✅ Correct path
     ports:
       - "8081:80"
     depends_on:
       - postgres
     networks:
       - hadoop-network
+
 
   namenode:
     build:
@@ -81,7 +83,12 @@ services:
       - POSTGRES_DB=metastore
       - POSTGRES_USER=hiveuser
       - POSTGRES_PASSWORD=hivepassword
-      - HIVE_CONF_DIR=/home/hive/conf
+      - TMPDIR=/tmp/gunicorn
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10000"]  # Check if HiveServer2 is running
+      interval: 40s
+      timeout: 50s
+      retries: 5
     depends_on:
       - postgres
       - namenode
@@ -95,15 +102,24 @@ services:
   hue:
     image: gethue/hue:latest
     container_name: hue
+    user: "1001:1000"  # 🔹 Run as hue user instead of root
     environment:
+      - TMPDIR=/tmp/gunicorn
       - HUE_CONF_DIR=/hue/desktop/conf
       - HUE_IGNORE_PASSWORD_SCRIPT_ERRORS=true
+      - HUE_DATABASE=postgres
+      - HUE_DATABASE_USER=hueuser
+      - HUE_DATABASE_PASS=huepassword
+      - HUE_DATABASE_DB=hue
+      - HUE_SECRET_KEY=secret
     volumes:
       - ./hue:/hue/desktop/conf
+      - ./hue/hue.ini:/usr/share/hue/desktop/conf/hue.ini
     ports:
       - "8888:8888"
     depends_on:
-      - hive
+      hive:
+        condition: service_healthy
     networks:
        - hadoop-network
   spark:

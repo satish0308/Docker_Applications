@@ -7,49 +7,68 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     vim \
-    sudo
+    sudo \
+    openssh-server
 
-RUN mkdir /var/run/sshd
-RUN service ssh start
+# Ensure SSH service starts
+RUN mkdir -p /var/run/sshd
+RUN mkdir -p /home/hadoop/logs
 
-# Download and install Hadoop
-#RUN wget https://archive.apache.org/dist/hadoop/common/hadoop-3.3.4/hadoop-3.3.4.tar.gz
-#RUN tar -xzvf hadoop-3.3.4.tar.gz
-#RUN mv hadoop-3.3.4 /usr/local/hadoop
+# Create Hadoop and HDFS users
+RUN useradd -m -s /bin/bash hadoop && \
+    useradd -m -s /bin/bash hdfs && \
+    usermod -aG hdfs hadoop  # Allow hadoop to access hdfs files
 
-# Copy Hadoop tarball
+# Set up passwordless SSH for Hadoop user
+RUN mkdir -p /home/hadoop/.ssh && \
+    ssh-keygen -t rsa -b 4096 -f /home/hadoop/.ssh/id_rsa -N "" && \
+    cat /home/hadoop/.ssh/id_rsa.pub >> /home/hadoop/.ssh/authorized_keys && \
+    touch /home/hadoop/.ssh/known_hosts && \
+    chmod 700 /home/hadoop/.ssh && \
+    chmod 600 /home/hadoop/.ssh/id_rsa /home/hadoop/.ssh/authorized_keys /home/hadoop/.ssh/known_hosts && \
+    chown -R hadoop:hadoop /home/hadoop/.ssh
+
+# Fix SSH Configuration (remove root login)
+RUN echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "StrictModes no" >> /etc/ssh/sshd_config && \
+    echo "AllowUsers hadoop root" >> /etc/ssh/sshd_config && \
+    sed -i '/PermitRootLogin yes/d' /etc/ssh/sshd_config
+
+# Set root password for SSH access
+RUN echo 'root:hadoop' | chpasswd
+
+# Ensure proper ownership and permissions
+RUN chown -R hdfs:hadoop /home/hadoop && chmod -R 775 /home/hadoop
+
+# Copy Hadoop tarball and extract
 COPY downloads/hadoop-3.4.0.tar.gz /tmp/hadoop-3.4.0.tar.gz
-RUN mkdir -p /home/hadoop
-RUN tar -xf /tmp/hadoop-3.4.0.tar.gz -C /home/hadoop --strip-components=1
-RUN rm /tmp/hadoop-3.4.0.tar.gz
+RUN mkdir -p /home/hadoop && \
+    tar -xf /tmp/hadoop-3.4.0.tar.gz -C /home/hadoop --strip-components=1 && \
+    rm /tmp/hadoop-3.4.0.tar.gz
 
 # Set up environment variables
-ENV HADOOP_HOME /home/hadoop
-ENV PATH $HADOOP_HOME/bin:$PATH
-RUN mkdir -p /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data
-
-# Set up passwordless SSH for Hadoop communication
-RUN ssh-keygen -q -t rsa -N "" -f ~/.ssh/id_rsa && \
-    cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys && \
-    chmod 0600 ~/.ssh/authorized_keys
-
-# Create Hadoop configuration files
-COPY config/core-site.xml $HADOOP_HOME/etc/hadoop/
-COPY config/hdfs-site.xml $HADOOP_HOME/etc/hadoop/
-COPY config/hadoop-env.sh $HADOOP_HOME/etc/hadoop/
-
-# Create hdfs user and set permissions
-RUN useradd -m hdfs
-RUN chown -R hdfs:hdfs /home/hadoop
-ENV HADOOP_USER_NAME hdfs
+ENV HADOOP_HOME=/home/hadoop
+ENV HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
+ENV PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
+ENV HADOOP_USER_NAME=hdfs
 ENV HDFS_NAMENODE_USER=hdfs
 ENV HDFS_DATANODE_USER=hdfs
 ENV HDFS_SECONDARYNAMENODE_USER=hdfs
 
-# Expose Hadoop ports
-EXPOSE 9870 9864 9000
+# Create necessary Hadoop directories
+RUN mkdir -p /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data && \
+    chown -R hdfs:hadoop /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data && \
+    chmod -R 775 /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data
 
-# Copy entrypoint script for NameNode and DataNode
+# Copy Hadoop configuration files
+COPY config/core-site.xml $HADOOP_HOME/etc/hadoop/
+COPY config/hdfs-site.xml $HADOOP_HOME/etc/hadoop/
+COPY config/hadoop-env.sh $HADOOP_HOME/etc/hadoop/
+
+# Expose SSH and Hadoop ports
+EXPOSE 22 9870 9864 9000
+
+# Copy and set permissions for entrypoint script
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
