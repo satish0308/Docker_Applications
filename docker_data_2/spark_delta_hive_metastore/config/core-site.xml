@@ -11,4 +11,13 @@
     <name>hadoop.proxyuser.hdfs.groups</name>
     <value>*</value>
   </property>
+  <property>
+      <name>dfs.namenode.http-address</name>
+      <value>namenode:9870</value>
+  </property>
+
+  <property>
+      <name>dfs.webhdfs.enabled</name>
+      <value>true</value>
+  </property>
 </configuration>

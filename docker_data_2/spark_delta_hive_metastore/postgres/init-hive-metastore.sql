@@ -2,8 +2,9 @@
 --Hence commenting this.
 
 
---CREATE DATABASE metastore;
---CREATE USER hiveuser WITH PASSWORD 'hivepassword';
---GRANT ALL PRIVILEGES ON DATABASE metastore TO hiveuser;
+CREATE DATABASE hue;
+CREATE USER hueuser WITH PASSWORD 'huepassword';
+GRANT ALL PRIVILEGES ON DATABASE hue TO hueuser;
+
 
 
