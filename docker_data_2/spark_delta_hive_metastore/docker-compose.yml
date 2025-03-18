@@ -46,7 +46,7 @@ services:
       - HDFS_NAMENODE_USER=root
       - HADOOP_SSH_OPTS="-o StrictHostKeyChecking=no"
     volumes:
-      - ./hadoop/namenode/data:/hadoop/dfs/name
+      - ./hadoop/namenode/data:/home/hadoop/dfs/name
     ports:
       - "9870:9870" # NameNode Web UI
       - "9000:9000" # NameNode RPC
@@ -64,7 +64,7 @@ services:
       - HDFS_DATANODE_USER=hdfs
       - HDFS_SECONDARYNAMENODE_USER=hdfs
     volumes:
-      - ./hadoop/datanode/data:/hadoop/dfs/data
+      - ./hadoop/datanode/data:/home/hadoop/dfs/data
     ports:
       - "9864:9864" # DataNode Web UI
     networks:
