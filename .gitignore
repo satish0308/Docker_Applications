@@ -6,7 +6,18 @@ __pycache__/
 # C extensions
 *.so
 
+postgres/data/
+downloads/
+downloads_binaries/
+hadoop/
+/downloads/
+venv
+.idea/
+downloads
+
+
 # Distribution / packaging
+data/
 .Python
 build/
 develop-eggs/
