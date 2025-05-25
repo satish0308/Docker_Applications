@@ -13,10 +13,20 @@ sudo docker exec -it hue bash -c "echo 'import desktop.conf; print(desktop.conf.
 
 
 
+create external table if not exists breweries (
+  NUM int,
+  NAME char(100),
+  CITY char(100),
+  STATE char(100),
+  ID int)
+ROW format delimited
+fields terminated by ','
+stored as textfile
+location 'hdfs://namenode:9000/data/openbeer/breweries';
 
 
 
-
+docker exec -it datanode ssh -i /home/hadoop/.ssh/id_rsa -o StrictHostKeyChecking=no hadoop@172.18.0.3
 
 
 
