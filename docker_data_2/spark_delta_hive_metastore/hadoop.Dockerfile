@@ -14,10 +14,14 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /var/run/sshd
 RUN mkdir -p /home/hadoop/logs
 
-# Create Hadoop and HDFS users
-RUN useradd -m -s /bin/bash hadoop && \
-    useradd -m -s /bin/bash hdfs && \
-    usermod -aG hdfs hadoop  # Allow hadoop to access hdfs files
+RUN useradd -m -s /bin/bash hadoop
+RUN useradd -m -s /bin/bash hdfs
+RUN useradd -m -s /bin/bash yarn
+
+
+RUN usermod -aG hdfs hadoop && \
+    usermod -aG hdfs yarn  # Allow yarn to interact with HDFS
+
 
 # Set up passwordless SSH for Hadoop user
 RUN mkdir -p /home/hadoop/.ssh && \
@@ -32,7 +36,9 @@ RUN mkdir -p /home/hadoop/.ssh && \
 RUN echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
     echo "StrictModes no" >> /etc/ssh/sshd_config && \
     echo "AllowUsers hadoop root" >> /etc/ssh/sshd_config && \
-    sed -i '/PermitRootLogin yes/d' /etc/ssh/sshd_config
+    sed -i '/PermitRootLogin yes/d' /etc/ssh/sshd_config && \
+    service ssh restart
+
 
 # Set root password for SSH access
 RUN echo 'root:hadoop' | chpasswd
@@ -54,19 +60,47 @@ ENV HADOOP_USER_NAME=hdfs
 ENV HDFS_NAMENODE_USER=hdfs
 ENV HDFS_DATANODE_USER=hdfs
 ENV HDFS_SECONDARYNAMENODE_USER=hdfs
+ENV YARN_RESOURCEMANAGER_USER=yarn
+ENV YARN_NODEMANAGER_USER=yarn
+
 
 # Create necessary Hadoop directories
 RUN mkdir -p /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data && \
     chown -R hdfs:hadoop /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data && \
     chmod -R 775 /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data
 
+
 # Copy Hadoop configuration files
 COPY config/core-site.xml $HADOOP_HOME/etc/hadoop/
 COPY config/hdfs-site.xml $HADOOP_HOME/etc/hadoop/
 COPY config/hadoop-env.sh $HADOOP_HOME/etc/hadoop/
+COPY config/yarn-site.xml $HADOOP_HOME/etc/hadoop/
+COPY config/mapred-site.xml $HADOOP_HOME/etc/hadoop/
+
+# Ensure permissions are correct after copying
+RUN chown -R hdfs:hadoop $HADOOP_HOME/etc/hadoop && chmod -R 775 $HADOOP_HOME/etc/hadoop
+
+# Ensure Hadoop directories exist before setting permissions
+RUN mkdir -p /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data /home/hadoop/dfs /var/lib/hadoop && \
+    chown -R hdfs:hadoop /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data /home/hadoop/dfs /var/lib/hadoop && \
+    chmod -R 775 /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data /home/hadoop/dfs /var/lib/hadoop
+
+
+# Ensure read-write-execute permissions for all three users
+RUN chmod -R 775 /home/hadoop/tmp /home/hadoop/logs /home/hadoop/data /home/hadoop/dfs /var/lib/hadoop
+
+RUN echo "Adding Hadoop users to hdfs group..."
+RUN usermod -aG hadoop hdfs
+RUN usermod -aG hadoop yarn
+RUN usermod -aG hdfs hadoop
+RUN usermod -aG hdfs yarn
+RUN usermod -aG yarn hadoop
+RUN usermod -aG yarn hdfs
+
 
 # Expose SSH and Hadoop ports
-EXPOSE 22 9870 9864 9000
+
+EXPOSE 22 9870 9864 9866 9000 8088 8042 8030 8031 8032 8033
 
 # Copy and set permissions for entrypoint script
 COPY scripts/entrypoint.sh /entrypoint.sh

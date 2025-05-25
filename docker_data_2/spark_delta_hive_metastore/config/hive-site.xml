@@ -53,5 +53,24 @@
         <name>hive.server2.enable.doAs</name>
         <value>true</value>
     </property>
+    <property>
+    <name>hive.execution.engine</name>
+    <value>tez</value>  <!-- Use Tez instead of MapReduce -->
+    </property>
+
+    <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.address</name>
+        <value>resourcemanager:8032</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.scheduler.address</name>
+        <value>resourcemanager:8030</value>
+    </property>
 
 </configuration>

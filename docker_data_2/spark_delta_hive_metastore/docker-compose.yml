@@ -50,8 +50,13 @@ services:
     ports:
       - "9870:9870" # NameNode Web UI
       - "9000:9000" # NameNode RPC
+      - "2222:22"
     networks:
       - hadoop-network
+    extra_hosts:
+      - "namenode:172.18.0.2"
+      - "datanode:172.18.0.3"
+      - "resourcemanager:172.18.0.6"
 
   datanode:
     build:
@@ -67,8 +72,13 @@ services:
       - ./hadoop/datanode/data:/home/hadoop/dfs/data
     ports:
       - "9864:9864" # DataNode Web UI
+      - "2223:22" 
     networks:
       - hadoop-network
+    extra_hosts:
+      - "namenode:172.18.0.2"
+      - "datanode:172.18.0.3"
+      - "resourcemanager:172.18.0.6"
 
   hive:
     build:
@@ -139,8 +149,42 @@ services:
       - "8080:8080"
     networks:
       - hadoop-network
+  resourcemanager:
+    build:
+      context: .
+      dockerfile: hadoop.Dockerfile
+    container_name: resourcemanager
+    hostname: resourcemanager
+    environment:
+      - YARN_RESOURCEMANAGER_HOST=resourcemanager
+      - YARN_NODEMANAGER_HOST=nodemanager
+    ports:
+      - "8088:8088" # YARN ResourceManager Web UI
+    networks:
+      - hadoop-network
+    depends_on:
+      - namenode
+      - datanode
+    extra_hosts:
+      - "namenode:172.18.0.2"
+      - "datanode:172.18.0.3"
+      - "resourcemanager:172.18.0.6"
 
-
+  nodemanager:
+    build:
+      context: .
+      dockerfile: hadoop.Dockerfile
+    container_name: nodemanager
+    hostname: nodemanager
+    environment:
+      - YARN_RESOURCEMANAGER_HOST=resourcemanager
+      - YARN_NODEMANAGER_HOST=nodemanager
+    ports:
+      - "8042:8042" # YARN NodeManager Web UI
+    networks:
+      - hadoop-network
+    depends_on:
+      - resourcemanager
 
 networks:
   hadoop-network:
