@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: resourcemanager-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: resourcemanager.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: resourcemanager
+                port:
+                  number: 8088

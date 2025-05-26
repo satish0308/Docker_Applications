@@ -3,7 +3,7 @@
     <!-- JDBC connection string for PostgreSQL -->
     <property>
         <name>javax.jdo.option.ConnectionURL</name>
-        <value>jdbc:postgresql://hive-metastore-postgres:5432/metastore</value>
+        <value>jdbc:postgresql://postgres:5432/metastore</value>
         <description>PostgreSQL connection URL for Hive metastore</description>
     </property>
 

@@ -100,7 +100,7 @@ RUN mkdir -p /home/$USERNAME/app
 WORKDIR /home/$USERNAME/app
 
 # Expose necessary ports for Jupyter, Spark UI, and JDWP debug port
-EXPOSE 4040 4041 18080 8888 5555 8080
+EXPOSE 4040 4041 18080 8888 5555 8080 7077
 
 # Entrypoint
 ENTRYPOINT ["/home/spark/start-spark2.sh"]
