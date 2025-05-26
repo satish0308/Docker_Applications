@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert --out old_k8s/
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: hue
+  name: hue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: hue
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert --out old_k8s/
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: hue
+    spec:
+      containers:
+        - env:
+            - name: HUE_CONF_DIR
+              value: /hue/desktop/conf
+            - name: HUE_DATABASE
+              value: postgres
+            - name: HUE_DATABASE_DB
+              value: hue
+            - name: HUE_DATABASE_PASS
+              value: huepassword
+            - name: HUE_DATABASE_USER
+              value: hueuser
+            - name: HUE_IGNORE_PASSWORD_SCRIPT_ERRORS
+              value: "true"
+            - name: HUE_SECRET_KEY
+              value: secret
+            - name: TMPDIR
+              value: /tmp/gunicorn
+          image: gethue/hue:latest
+          name: hue
+          ports:
+            - containerPort: 8888
+              protocol: TCP
+          securityContext:
+            runAsGroup: 1000
+            runAsUser: 1001
+          volumeMounts:
+            - mountPath: /hue/desktop/conf
+              name: hue-cm0
+            - mountPath: /usr/share/hue/desktop/conf/hue.ini
+              name: hue-cm1
+              subPath: hue.ini
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            name: hue-cm0
+          name: hue-cm0
+        - configMap:
+            items:
+              - key: hue.ini
+                path: hue.ini
+            name: hue-cm1
+          name: hue-cm1

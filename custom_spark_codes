@@ -11,6 +11,9 @@ sudo docker compose up -d
 sudo docker exec -it hue bash -c "echo 'import desktop.conf; print(desktop.conf.DATABASE.ENGINE.get())' | /usr/share/hue/build/env/bin/hue shell"
 
 
+$HADOOP_HOME/sbin/yarn-daemon.sh start nodemanager
+- above inside the nodemanger pod
+
 
 
 create external table if not exists breweries (
@@ -58,3 +61,10 @@ hdfs dfs -chown sparkuser:supergroup /data
 
 spark-submit --driver-cores 1 --executor-cores 2 --num-executors 3  --executor-memory 1500 main.py /home/satish/Downloads/yelp_dataset/yelp_academic_dataset_user.json "/media/satish/New Volume/docker_data_2/spark_delta_hive_metastore/python_scripts/output"
 
+
+
+minikube addons enable metrics-server
+minikube addons enable ingress
+
+for jhub 
+kubectl port-forward svc/proxy-public 8081:80 -n jhub
