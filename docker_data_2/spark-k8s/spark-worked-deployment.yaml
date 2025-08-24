@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yml --out k8s/
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: spark
+    component: worker
+  name: spark-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: spark
+      component: worker
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yml --out k8s/
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: spark
+        component: worker
+    spec:
+      containers:
+        - image: satish0308/spark_s3:latest
+          name: spark-worker
+          command:
+            - /home/spark/bin/spark-class
+            - org.apache.spark.deploy.worker.Worker
+            - spark://spark-master:7077
+          ports:
+            - containerPort: 8081
+      restartPolicy: Always

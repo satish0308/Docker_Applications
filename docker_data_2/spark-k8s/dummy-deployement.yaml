@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dummy-debug-node
+  labels:
+    app: dummy-debug
+spec:
+  # Run as root so sudo works without password
+  securityContext:
+    runAsUser: 0
+  containers:
+  - name: debug-container
+    image: ubuntu:22.04
+    command:
+      - sleep
+      - "3600"  # keep alive for 1 hour
+    stdin: true
+    tty: true
+    securityContext:
+      privileged: true
+    # Install sudo and netcat on start
+    lifecycle:
+      postStart:
+        exec:
+          command:
+            [
+              "/bin/sh",
+              "-c",
+              "apt-get update && apt-get install -y sudo netcat iputils-ping && rm -rf /var/lib/apt/lists/*"
+            ]
+    # optional resources
+    resources:
+      limits:
+        cpu: "0.5"
+        memory: "256Mi"
+      requests:
+        cpu: "0.1"
+        memory: "128Mi"
