@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: namenode-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: namenode.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: namenode
+                port:
+                  number: 9870
