@@ -6,7 +6,7 @@ metadata:
     kompose.version: 1.36.0 (ae2a39403)
   labels:
     io.kompose.service: spark
-  name: spark-master
+  name: spark-worker
 spec:
   replicas: 1
   selector:
@@ -22,21 +22,13 @@ spec:
     spec:
       containers:
         - image: satish0308/spark:latest
-          name: spark-master
-          command: ["/home/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+          name: spark-worker
+          command:
+            - /home/spark/bin/spark-class
+            - org.apache.spark.deploy.worker.Worker
+            - spark://spark-master.default.svc.cluster.local:7077
           ports:
-            - containerPort: 4040
-              protocol: TCP
-            - containerPort: 4041
-              protocol: TCP
-            - containerPort: 18080
-              protocol: TCP
-            - containerPort: 5555
-              protocol: TCP
-            - containerPort: 8080
-              protocol: TCP
-            - containerPort: 7077
-              protocol: TCP
+            - containerPort: 8081
 
 
       restartPolicy: Always

@@ -1573,7 +1573,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
         - name: image-pull-singleuser
-          image: satish0308/jupyterhub-spark-s3:latest
+          image: satish0308/jupyterjub-spark-s3:latest
           command:
             - /bin/sh
             - -c
@@ -2187,7 +2187,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
         - name: image-pull-singleuser
-          image: satish0308/jupyterhub-spark-s3:latest
+          image: satish0308/jupyterjub-spark-s3:latest
           command:
             - /bin/sh
             - -c
