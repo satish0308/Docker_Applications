@@ -121,8 +121,13 @@ log "📺 Starting Minikube Dashboard..."
 minikube dashboard --url >> "$LOG_DIR/dashboard.log" 2>&1 &
 
 # Start port-forwarding in background
-port_forward default proxy-public 8081 80 &
+port_forward default proxy-public 4040 80 &
 port_forward kubernetes-dashboard kubernetes-dashboard 8080 80 &
 port_forward default spark-master 8082 8080 &
-
+port_forward default namenode 9870 9870 &
+port_forward default datanode 9864 9864 &
+port_forward default hue 8888 8888 &
+port_forward default pgadmin 8081 8081 &
+port_forward default resourcemanager 8088 8088 &
+port_forward default nodemanager 8042 8042 &
 wait

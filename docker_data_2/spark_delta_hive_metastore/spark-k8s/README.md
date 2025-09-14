@@ -146,3 +146,8 @@ for root, dirs, files in os.walk(local_folder):
 
         s3.upload_file(local_path, bucket_name, s3_key)
         print(f"✅ Uploaded {local_path} → s3://{bucket_name}/{s3_key}")
+
+
+run this inside hue pod
+
+./build/env/bin/hue migrate

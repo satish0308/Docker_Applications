@@ -139,3 +139,6 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 
+run this inside hue pod
+
+./build/env/bin/hue migrate

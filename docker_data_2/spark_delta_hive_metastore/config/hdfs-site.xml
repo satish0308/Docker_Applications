@@ -31,4 +31,8 @@
     <name>dfs.datanode.use.datanode.hostname</name>
     <value>true</value>
   </property> 
+  <property>
+    <name>dfs.datanode.hostname</name>
+    <value>${POD_NAME}.hadoop-datanode.default.svc.cluster.local</value>
+  </property>
 </configuration>

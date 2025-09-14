@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     vim \
     sudo \
+    procps \
     whois \
     ca-certificates-java
 

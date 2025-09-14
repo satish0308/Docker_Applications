@@ -92,3 +92,7 @@ ps aux | grep hiveserver2
 
 
 
+migration for the hue if in case internal server errror
+run this inside hue pod
+
+./build/env/bin/hue migrate
