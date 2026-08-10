@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-11-jre-headless \
     postgresql-client-13 \
     netcat \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Create users

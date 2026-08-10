@@ -12,7 +12,7 @@ echo "========================================"
 export HADOOP_HOME=/home/hadoop
 export PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
-export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64  # Ensure this path is correct
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64  # Corrected to Java 11
 
 echo "✅ Environment Variables Set:"
 echo "HADOOP_HOME: $HADOOP_HOME"
