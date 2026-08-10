@@ -1,7 +1,7 @@
-CREATE DATABASE metastore;
-CREATE USER hiveuser WITH PASSWORD 'hivepassword';
+SELECT 'CREATE DATABASE metastore' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore')\gexec
+CREATE USER IF NOT EXISTS hiveuser WITH PASSWORD 'hivepassword';
 GRANT ALL PRIVILEGES ON DATABASE metastore TO hiveuser;
 
-CREATE DATABASE hue;
-CREATE USER hueuser WITH PASSWORD 'huepassword';
+SELECT 'CREATE DATABASE hue' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'hue')\gexec
+CREATE USER IF NOT EXISTS hueuser WITH PASSWORD 'huepassword';
 GRANT ALL PRIVILEGES ON DATABASE hue TO hueuser;
