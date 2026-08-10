@@ -199,7 +199,7 @@ if [[ $HOSTNAME == "namenode" ]]; then
 
     # Keep container running
     echo "📌 Keeping the container alive..."
-    exec sleep infinity
+    exec tail -f /dev/null
 elif [[ $HOSTNAME == "resourcemanager" ]]; then
     echo "🖥 Starting ResourceManager..."
     sleep 10
