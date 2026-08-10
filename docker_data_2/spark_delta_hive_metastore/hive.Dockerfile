@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy tarballs
 COPY downloads/hadoop-3.4.0.tar.gz /tmp/hadoop-3.4.0.tar.gz
 COPY downloads/apache-hive-4.0.0-bin.tar.gz /tmp/apache-hive-4.0.0-bin.tar.gz
+COPY downloads/postgresql-42.2.23.jar /tmp/postgresql-42.2.23.jar
 
 # Extract Hadoop
 RUN mkdir -p /opt/hadoop && \
@@ -20,8 +21,8 @@ RUN mkdir -p /opt/hive && \
     tar -xf /tmp/apache-hive-4.0.0-bin.tar.gz -C /opt/hive --strip-components=1 && \
     rm /tmp/apache-hive-4.0.0-bin.tar.gz
 
-# Get Postgres Driver
-RUN wget https://jdbc.postgresql.org/download/postgresql-42.2.23.jar -P /opt/hive/lib/
+# Copy Postgres Driver
+RUN cp /tmp/postgresql-42.2.23.jar /opt/hive/lib/postgresql-42.2.23.jar
 
 # Stage 2: Runtime
 FROM debian:bullseye-slim

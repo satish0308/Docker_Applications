@@ -35,10 +35,26 @@ if [ ! -f "$DOWNLOAD_DIR/delta-storage-3.2.0.jar" ]; then
     curl -L https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.0/delta-storage-3.2.0.jar -o "$DOWNLOAD_DIR/delta-storage-3.2.0.jar"
 fi
 
-# --- PostgreSQL JDBC ---
+# --- JDBC Drivers ---
 if [ ! -f "$DOWNLOAD_DIR/postgresql-42.7.4.jar" ]; then
-    echo "Downloading Postgres JDBC Driver..."
+    echo "Downloading Postgres JDBC Driver (Spark)..."
     curl -L https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar -o "$DOWNLOAD_DIR/postgresql-42.7.4.jar"
+fi
+
+if [ ! -f "$DOWNLOAD_DIR/postgresql-42.2.23.jar" ]; then
+    echo "Downloading Postgres JDBC Driver (Hive)..."
+    curl -L https://jdbc.postgresql.org/download/postgresql-42.2.23.jar -o "$DOWNLOAD_DIR/postgresql-42.2.23.jar"
+fi
+
+# --- Hadoop AWS Connectors ---
+if [ ! -f "$DOWNLOAD_DIR/hadoop-aws-3.3.4.jar" ]; then
+    echo "Downloading Hadoop AWS 3.3.4..."
+    curl -L https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o "$DOWNLOAD_DIR/hadoop-aws-3.3.4.jar"
+fi
+
+if [ ! -f "$DOWNLOAD_DIR/aws-java-sdk-bundle-1.12.379.jar" ]; then
+    echo "Downloading AWS Java SDK 1.12.379..."
+    curl -L https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.379/aws-java-sdk-bundle-1.12.379.jar -o "$DOWNLOAD_DIR/aws-java-sdk-bundle-1.12.379.jar"
 fi
 
 echo "All dependencies downloaded successfully."
