@@ -1,94 +1,68 @@
+# 🚀 Big Data Platform (BDP) Sandbox
 
+This project provides a comprehensive, Docker-based Big Data environment, merging features from the classic Hadoop/Spark stack with modern integrations like Delta Lake, MinIO (S3-compatible object store), and an interactive JupyterHub notebook environment.
 
+---
 
-After starting your cluster with docker-compose up --build, you can access Hue in your browser at:
-http://localhost:8888
+## 📦 Components
 
+- **Hadoop Ecosystem**: HDFS (Namenode/Datanode), YARN (ResourceManager/NodeManager).
+- **Compute Engine**: Custom Spark 3.5.2 engine with Delta Lake 3.2.0, AWS SDK, and Postgres JDBC drivers.
+- **Metastore**: Hive Metastore backed by PostgreSQL, with pgAdmin for management.
+- **Visualizer**: Hue for HDFS exploration and SQL query editing.
+- **Storage**: MinIO for S3-compatible data lake storage.
+- **Interactive**: JupyterLab notebook environment pre-configured with Spark and MinIO connectivity.
 
+---
 
-Hue should automatically detect your HiveServer2 service through its internal network. 
-If needed, you can configure Hue to use the correct HiveServer2 Thrift endpoint by 
-editing hue/desktop/conf/hue.ini (mounted from ./hue/ on the host).
+## 🚀 Getting Started
 
-```editorconfig
-[beeswax]
-hive_server_host=namenode
-hive_server_port=10000
+1.  **Bring up the infrastructure**:
+    ```bash
+    # Navigate to the directory
+    cd docker_data_2/spark_delta_hive_metastore/
+    
+    # Start the services
+    docker-compose up -d
+    ```
 
+2.  **Accessing Services**:
+    - **Hue**: `http://localhost:8888`
+    - **JupyterLab**: `http://localhost:8889`
+    - **MinIO Console**: `http://localhost:9001` (login: `minioadmin` / `minioadmin123`)
+    - **Spark UI**: `http://localhost:8080`
+    - **pgAdmin**: `http://localhost:8081`
+    - **HDFS Namenode**: `http://localhost:9870`
+    - **YARN ResourceManager**: `http://localhost:8088`
+
+---
+
+## ⚙️ Connectivity
+
+### Connecting Jupyter to Spark
+In your JupyterLab notebook, use the following `SparkSession` builder to connect to the Spark master:
+
+```python
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \
+    .appName("BDP Jupyter Session") \
+    .master("spark://spark:7077") \
+    .config("spark.executor.memory", "2g") \
+    .getOrCreate()
 ```
 
+### Connecting Jupyter to MinIO (S3)
+To query data stored in MinIO:
 
-NameNode UI: http://localhost:9870
-DataNode UI: http://localhost:9864
-Postgres SQL (PGAdmin): http://localhost:8081
-    - admin@admin.com
-    - admin
-
-psql -h localhost -p 5432 -U hiveuser -d metastore
-
-beeline -u jdbc:hive2://localhost:10000
-
-
-
-# Create table in hive
-
-CREATE DATABASE sample_db;
-
-SHOW DATABASES;
-
-USE sample_db;
-
-CREATE TABLE employees (
-    emp_id INT,
-    name STRING,
-    position STRING,
-    salary FLOAT
-)
-ROW FORMAT DELIMITED
-FIELDS TERMINATED BY ','
-LINES TERMINATED BY '\n'
-STORED AS TEXTFILE;
-
-
-INSERT INTO employees VALUES
-    (1, 'John Doe', 'Software Engineer', 75000.00),
-    (2, 'Jane Smith', 'Data Scientist', 95000.00),
-    (3, 'Mike Johnson', 'DevOps Engineer', 85000.00);
-
-
-SELECT * FROM employees;
-
-
-
-
-# Where to see table details in hive metastore. Which database, which table 
-
-Key tables in the Hive Metastore:
-
-DBS: Contains information about Hive databases.
-TBLS: Contains information about Hive tables.
-SDS: Stores information about table storage descriptors.
-COLUMNS_V2: Contains details about the table columns (schema).
-PARTITIONS: Stores partition details if your table is partitioned.
-BUCKETING_COLS: Information about bucketed columns (if used).
-
-select * from public."DBS";
-SELECT * FROM TBLS WHERE db_id IN (SELECT db_id FROM DBS WHERE name = 'sample_db');
-SELECT * FROM COLUMNS_V2 WHERE cd_id IN (SELECT sd_id FROM SDS WHERE tbl_id IN (SELECT tbl_id FROM TBLS WHERE tbl_name = 'employees'));
-
-SELECT * FROM TBLS WHERE db_id = (SELECT db_id FROM DBS WHERE name = 'sample_db') AND tbl_name = 'employees';
-SELECT * FROM COLUMNS_V2 WHERE cd_id = (SELECT sd_id FROM SDS WHERE tbl_id = (SELECT tbl_id FROM TBLS WHERE tbl_name = 'employees'));
-
-
-
-
-http://localhost:8888/hue
-admin
-admin
-
-
-1. Check if HiveServer2 is running
-ps aux | grep hiveserver2
-
-
-
+```python
+spark = SparkSession.builder \
+    .appName("BDP MinIO Connection") \
+    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
+    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
+    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
+    .getOrCreate()
+```
