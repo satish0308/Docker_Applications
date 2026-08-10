@@ -111,18 +111,18 @@ services:
   hue:
     image: gethue/hue:latest
     container_name: hue
+    command: /bin/bash -c "chmod -R 777 /hue/desktop/conf && /usr/bin/supervisor -c /hue/desktop/conf/supervisord.conf"
     environment:
       - TMPDIR=/tmp/gunicorn
       - HUE_CONF_DIR=/hue/desktop/conf
       - HUE_IGNORE_PASSWORD_SCRIPT_ERRORS=true
       - HUE_DATABASE=postgres
       - HUE_DATABASE_USER=hueuser
-      - HUE_DATABASE_PASS=huepassword
+      - HUE_DATABASE_PASS=hivepassword
       - HUE_DATABASE_DB=hue
       - HUE_SECRET_KEY=secret
     volumes:
       - ./hue:/hue/desktop/conf
-      - ./hue/hue.ini:/usr/share/hue/desktop/conf/hue.ini
     ports:
       - "8888:8888"
     depends_on:
