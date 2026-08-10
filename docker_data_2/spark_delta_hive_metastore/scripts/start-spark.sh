@@ -2,7 +2,7 @@
 set -e
 
 # Environment variables
-SPARK_HOME=/home/spark
+SPARK_HOME=/opt/spark
 SPARK_MASTER_URL=${SPARK_MASTER_URL:-"spark://spark-master:7077"}
 SPARK_MODE=${SPARK_MODE:-"worker"}  # Can be "master" or "worker"
 SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-1}
