@@ -46,4 +46,6 @@ COPY downloads/aws-java-sdk-bundle-1.12.379.jar ${SPARK_HOME}/jars/aws-java-sdk-
 
 USER $NB_UID
 
-EXPOSE 7077 4040
+EXPOSE 7077 8888
+
+ENTRYPOINT ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
