@@ -172,7 +172,7 @@ echo "SSH configuration updated successfully!"
 
 #!/bin/bash
 
-echo "🔄 Checking if this is the NameNode..."
+echo "🔄 Checking container role..."
 if [[ $HOSTNAME == "namenode" ]]; then
     echo "🖥 Namenode detected!"
     sleep 10
@@ -200,13 +200,21 @@ if [[ $HOSTNAME == "namenode" ]]; then
     # Keep container running
     echo "📌 Keeping the container alive..."
     exec sleep infinity
+elif [[ $HOSTNAME == "resourcemanager" ]]; then
+    echo "🖥 Starting ResourceManager..."
+    sleep 10
+    su - yarn -c "$HADOOP_HOME/sbin/yarn-daemon.sh start resourcemanager"
+    exec sleep infinity
+elif [[ $HOSTNAME == "nodemanager" ]]; then
+    echo "🖥 Starting NodeManager..."
+    sleep 10
+    su - yarn -c "$HADOOP_HOME/sbin/yarn-daemon.sh start nodemanager"
+    exec sleep infinity
 else
     echo "🖥 Starting DataNode..."
     sleep 10
     su - hdfs -c "$HADOOP_HOME/sbin/hadoop-daemon.sh start datanode"
-
-    # Keep DataNode container running
-    tail -f /dev/null
+    exec sleep infinity
 fi
 
 
