@@ -17,7 +17,7 @@ FROM debian:bullseye-slim
 
 # Install minimal runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-11-jre-headless \
+    openjdk-11-jdk \
     ssh \
     vim \
     sudo \
