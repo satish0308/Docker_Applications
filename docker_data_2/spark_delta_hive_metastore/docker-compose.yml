@@ -111,7 +111,7 @@ services:
   hue:
     image: gethue/hue:latest
     container_name: hue
-    command: /usr/share/hue/build/env/bin/supervisor -c /hue/desktop/conf/supervisord.conf
+    command: /usr/share/hue/build/env/bin/supervisor
     environment:
       - TMPDIR=/tmp/gunicorn
       - HUE_CONF_DIR=/hue/desktop/conf
