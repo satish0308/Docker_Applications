@@ -12,16 +12,20 @@ def get_container_stats():
     containers = client.containers.list(all=True)
     data = []
     for c in containers:
-        stats = c.stats(stream=False)
-        # Basic parsing
-        mem_usage = stats.get('memory_stats', {}).get('usage', 0)
-        mem_limit = stats.get('memory_stats', {}).get('limit', 1)
-        mem_perc = (mem_usage / mem_limit) * 100 if mem_limit > 0 else 0
+        try:
+            stats = c.stats(stream=False)
+            mem_usage = stats.get('memory_stats', {}).get('usage', 0)
+            mem_limit = stats.get('memory_stats', {}).get('limit', 1)
+            mem_perc = (mem_usage / mem_limit) * 100 if mem_limit > 0 else 0
+            image = c.image.tags[0] if c.image.tags else "N/A"
+        except (docker.errors.APIError, docker.errors.ImageNotFound):
+            mem_perc = 0
+            image = "Unknown/Error"
         
         data.append({
             "Name": c.name,
             "Status": c.status,
-            "Image": c.image.tags[0] if c.image.tags else "N/A",
+            "Image": image,
             "Memory %": round(mem_perc, 2)
         })
     return pd.DataFrame(data)
