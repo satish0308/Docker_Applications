@@ -50,6 +50,14 @@ chmod 600 /home/hdfs/.ssh/authorized_keys
 echo "🚀 Starting SSH service..."
 service ssh start
 
+# Wait for postgres to be ready
+echo "Waiting for postgres to be ready..."
+until nc -z postgres 5432; do
+  echo "Postgres is unavailable - sleeping"
+  sleep 5
+done
+echo "Postgres is up - executing command"
+
 # Validate passwordless SSH for hdfs user
 echo "🔄 Testing passwordless SSH for hdfs user..."
 if ! sudo -u hdfs ssh -o StrictHostKeyChecking=no localhost exit; then
