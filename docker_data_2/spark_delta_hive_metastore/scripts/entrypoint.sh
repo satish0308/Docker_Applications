@@ -198,7 +198,14 @@ if [[ $HOSTNAME == "namenode" ]]; then
 
         sleep 10
 
-        su - yarn -c "$HADOOP_HOME/sbin/start-yarn.sh" || { echo "❌ YARN START FAILED"; exit 1; }
+        echo "🚀 Starting YARN services (logging to /tmp/yarn_start.log)..."
+        su - yarn -c "$HADOOP_HOME/sbin/start-yarn.sh > /tmp/yarn_start.log 2>&1" || { 
+            echo "❌ YARN START FAILED"; 
+            echo "--- YARN LOG START ---";
+            cat /tmp/yarn_start.log;
+            echo "--- YARN LOG END ---";
+            exit 1; 
+        }
     fi
 
     # Keep container running
