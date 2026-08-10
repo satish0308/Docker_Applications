@@ -111,7 +111,7 @@ services:
   hue:
     image: gethue/hue:latest
     container_name: hue
-    command: /bin/bash -c "chmod -R 777 /hue/desktop/conf && /usr/bin/supervisor -c /hue/desktop/conf/supervisord.conf"
+    command: /usr/bin/supervisor -c /hue/desktop/conf/supervisord.conf
     environment:
       - TMPDIR=/tmp/gunicorn
       - HUE_CONF_DIR=/hue/desktop/conf
