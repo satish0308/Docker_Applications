@@ -214,16 +214,18 @@ services:
     networks:
       - hadoop-network
 
-  admin-panel:
+  livy:
     build:
-      context: ./admin_panel
-    container_name: admin-panel
+      context: .
+      dockerfile: spark.Dockerfile
+    container_name: livy
     ports:
-      - "8501:8501"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - "8998:8998"
+    depends_on:
+      - spark
     networks:
       - hadoop-network
+    command: /opt/spark/bin/livy-server
 
 networks:
   hadoop-network:
