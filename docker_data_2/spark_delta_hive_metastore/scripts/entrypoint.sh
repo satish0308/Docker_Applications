@@ -194,16 +194,16 @@ if [[ $HOSTNAME == "namenode" ]]; then
         fi
         
         echo "🚀 Starting HDFS services..."
-        su - hdfs -c "$HADOOP_HOME/sbin/start-dfs.sh"
+        su - hdfs -c "$HADOOP_HOME/sbin/start-dfs.sh" || { echo "❌ DFS START FAILED"; exit 1; }
 
-        sleep 60
+        sleep 10
 
-        su - yarn -c "$HADOOP_HOME/sbin/start-yarn.sh"
+        su - yarn -c "$HADOOP_HOME/sbin/start-yarn.sh" || { echo "❌ YARN START FAILED"; exit 1; }
     fi
 
     # Keep container running
     echo "📌 Keeping the container alive..."
-    tail -f /dev/null  # This prevents the container from exiting
+    exec sleep infinity
 else
     echo "🖥 Starting DataNode..."
     sleep 10
