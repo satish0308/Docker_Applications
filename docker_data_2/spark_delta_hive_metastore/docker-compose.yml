@@ -113,8 +113,8 @@ services:
     container_name: hue
     command: /usr/share/hue/build/env/bin/supervisor
     environment:
-      - TMPDIR=/tmp/gunicorn
-      - HUE_CONF_DIR=/hue/desktop/conf
+      - TMPDIR=/tmp
+      - HUE_CONF_DIR=/usr/share/hue/desktop/conf
       - HUE_IGNORE_PASSWORD_SCRIPT_ERRORS=true
       - HUE_DATABASE=postgres
       - HUE_DATABASE_USER=hueuser
@@ -122,7 +122,7 @@ services:
       - HUE_DATABASE_DB=hue
       - HUE_SECRET_KEY=secret
     volumes:
-      - ./hue:/hue/desktop/conf
+      - ./hue/hue.ini:/usr/share/hue/desktop/conf/hue.ini:ro
     ports:
       - "8888:8888"
     depends_on:
