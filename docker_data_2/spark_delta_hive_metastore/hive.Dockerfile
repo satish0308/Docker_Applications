@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy tarballs
+# Copy tarballs and JARs
 COPY downloads/hadoop-3.4.0.tar.gz /tmp/hadoop-3.4.0.tar.gz
 COPY downloads/apache-hive-4.0.0-bin.tar.gz /tmp/apache-hive-4.0.0-bin.tar.gz
 COPY downloads/postgresql-42.2.23.jar /tmp/postgresql-42.2.23.jar
