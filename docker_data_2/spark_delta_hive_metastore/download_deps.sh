@@ -37,13 +37,8 @@ fi
 
 # --- JDBC Drivers ---
 if [ ! -f "$DOWNLOAD_DIR/postgresql-42.7.4.jar" ]; then
-    echo "Downloading Postgres JDBC Driver (Spark)..."
+    echo "Downloading Postgres JDBC Driver..."
     curl -L https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar -o "$DOWNLOAD_DIR/postgresql-42.7.4.jar"
-fi
-
-if [ ! -f "$DOWNLOAD_DIR/postgresql-42.2.23.jar" ]; then
-    echo "Downloading Postgres JDBC Driver (Hive)..."
-    curl -L https://jdbc.postgresql.org/download/postgresql-42.2.23.jar -o "$DOWNLOAD_DIR/postgresql-42.2.23.jar"
 fi
 
 # --- Hadoop AWS Connectors ---
