@@ -195,17 +195,6 @@ if [[ $HOSTNAME == "namenode" ]]; then
         
         echo "🚀 Starting HDFS services..."
         su - hdfs -c "$HADOOP_HOME/sbin/start-dfs.sh" || { echo "❌ DFS START FAILED"; exit 1; }
-
-        sleep 10
-
-        echo "🚀 Starting YARN services (logging to /tmp/yarn_start.log)..."
-        su - yarn -c "$HADOOP_HOME/sbin/start-yarn.sh > /tmp/yarn_start.log 2>&1" || { 
-            echo "❌ YARN START FAILED"; 
-            echo "--- YARN LOG START ---";
-            cat /tmp/yarn_start.log;
-            echo "--- YARN LOG END ---";
-            exit 1; 
-        }
     fi
 
     # Keep container running
