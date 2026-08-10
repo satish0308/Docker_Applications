@@ -60,14 +60,16 @@ COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
 COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml
 COPY config/hdfs-site.xml ${SPARK_HOME}/conf/hdfs-site.xml
 
+# Copy scripts BEFORE switching user
+COPY scripts/start-spark.sh /home/$USERNAME/start-spark2.sh
+RUN chmod +x /home/$USERNAME/start-spark2.sh && \
+    chown $USERNAME:$USERNAME /home/$USERNAME/start-spark2.sh
+
 USER $USERNAME
 WORKDIR /home/$USERNAME/app
 
 ENV SPARK_CLASSPATH="/home/spark/jars/*"
 ENV SPARK_MODE="master"
-
-COPY scripts/start-spark.sh /home/$USERNAME/start-spark2.sh
-RUN chmod +x /home/$USERNAME/start-spark2.sh
 
 EXPOSE 4040 4041 18080 8888 5555 8080 7077
 
