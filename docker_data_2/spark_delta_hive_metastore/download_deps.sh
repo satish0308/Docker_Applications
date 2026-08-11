@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory to store downloads
-DOWNLOAD_DIR="/workspaces/Docker_Applications/docker_data_2/spark_delta_hive_metastore/downloads"
+DOWNLOAD_DIR="downloads"
 mkdir -p "$DOWNLOAD_DIR"
 
 echo "Downloading dependencies into $DOWNLOAD_DIR..."
@@ -19,9 +19,9 @@ if [ ! -f "$DOWNLOAD_DIR/hadoop-3.4.0.tar.gz" ]; then
 fi
 
 # --- Apache Livy ---
-if [ ! -f "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz" ]; then
+if [ ! -f "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating_2.12-bin.zip" ]; then
     echo "Downloading Livy 0.8.0..."
-    curl -L https://archive.apache.org/dist/incubator/livy/0.8.0-incubating/apache-livy-0.8.0-incubating-bin.tar.gz -o "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz"
+    curl -L https://archive.apache.org/dist/incubator/livy/0.8.0-incubating/apache-livy-0.8.0-incubating_2.12-bin.zip -o "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating_2.12-bin.zip"
 fi
 
 # --- Delta Lake JARs ---
@@ -50,6 +50,11 @@ fi
 if [ ! -f "$DOWNLOAD_DIR/aws-java-sdk-bundle-1.12.379.jar" ]; then
     echo "Downloading AWS Java SDK 1.12.379..."
     curl -L https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.379/aws-java-sdk-bundle-1.12.379.jar -o "$DOWNLOAD_DIR/aws-java-sdk-bundle-1.12.379.jar"
+fi
+
+if [ ! -f "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz" ]; then
+    echo "Downloading apache-livy-0.8.0-incubating-bin.tar.gz "
+    curl -L https://archive.apache.org/dist/incubator/livy/0.8.0-incubating/apache-livy-0.8.0-incubating-bin.tar.gz -o "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz"
 fi
 
 echo "All dependencies downloaded successfully."
