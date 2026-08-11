@@ -43,6 +43,7 @@ with tab1:
         st.link_button("Jupyter", "http://localhost:8889")
     with col2:
         st.link_button("MinIO Console", "http://localhost:9001")
+        st.link_button("Livy UI", "http://localhost:8998")
         st.link_button("Spark UI", "http://localhost:8089")
     with col3:
         st.link_button("pgAdmin", "http://localhost:8081")
