@@ -225,7 +225,7 @@ services:
       - spark
     networks:
       - hadoop-network
-    command: /opt/spark/bin/livy-server
+    entrypoint: ["/opt/spark/bin/livy-server"]
 
   admin-panel:
     build:
