@@ -10,8 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-# Copy diagnostic script from parent directory
-COPY ../diagnose_cluster.sh /app/diagnose_cluster.sh
+# Copy diagnostic script from current directory
+COPY diagnose_cluster.sh /app/diagnose_cluster.sh
 RUN chmod +x /app/diagnose_cluster.sh
 
 EXPOSE 8501
