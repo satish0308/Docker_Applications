@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy tarballs and jars
-COPY downloads/spark-3.5.2-bin-hadoop3-scala2.13.tgz /tmp/spark.tgz
-COPY downloads/delta-spark_2.13-3.2.0.jar /opt/jars/delta-spark.jar
+COPY downloads/spark-3.5.2-bin-hadoop3.tgz /tmp/spark.tgz
+COPY downloads/delta-spark_2.12-3.2.0.jar /opt/jars/delta-spark.jar
 COPY downloads/delta-storage-3.2.0.jar /opt/jars/delta-storage.jar
 COPY downloads/postgresql-42.7.4.jar /opt/jars/postgresql.jar
 COPY downloads/hadoop-aws-3.3.4.jar /opt/jars/hadoop-aws-3.3.4.jar
@@ -26,6 +26,23 @@ FROM python:3.11-slim
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV SPARK_HOME=/opt/spark
 ENV PATH="$JAVA_HOME/bin:$SPARK_HOME/bin:$PATH"
+
+# JDK 17+/21 locks down reflective access that Kryo needs (e.g. to serialize
+# SerializedLambda); without these opens, driver/executor JVMs launched here
+# crash with InaccessibleObjectException during RSC/task serialization.
+ENV JDK_JAVA_OPTIONS="--add-opens=java.base/java.lang=ALL-UNNAMED \
+--add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
+--add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+--add-opens=java.base/java.io=ALL-UNNAMED \
+--add-opens=java.base/java.net=ALL-UNNAMED \
+--add-opens=java.base/java.nio=ALL-UNNAMED \
+--add-opens=java.base/java.util=ALL-UNNAMED \
+--add-opens=java.base/java.util.concurrent=ALL-UNNAMED \
+--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+--add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+--add-opens=java.base/sun.nio.cs=ALL-UNNAMED \
+--add-opens=java.base/sun.security.action=ALL-UNNAMED \
+--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
 
 # Install Runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -52,9 +69,13 @@ RUN mkdir -p /home/$USERNAME/app ${SPARK_HOME}/logs ${SPARK_HOME}/event_logs && 
     chown -R $USER_UID:$USER_GID ${SPARK_HOME} /home/$USERNAME
 
 # Configs
+# spark.deploy.defaultCores caps how many cores a standalone app gets when it
+# doesn't request spark.cores.max itself (Livy's clients don't set it), so one
+# idle session can't grab every core in the cluster and starve the rest.
 RUN echo "spark.eventLog.enabled true" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
     echo "spark.eventLog.dir file://${SPARK_HOME}/event_logs" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
-    echo "spark.history.fs.logDirectory file://${SPARK_HOME}/event_logs" >> ${SPARK_HOME}/conf/spark-defaults.conf
+    echo "spark.history.fs.logDirectory file://${SPARK_HOME}/event_logs" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
+    echo "spark.deploy.defaultCores 1" >> ${SPARK_HOME}/conf/spark-defaults.conf
 
 COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
 COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml

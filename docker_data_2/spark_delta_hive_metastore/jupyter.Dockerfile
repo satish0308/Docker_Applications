@@ -18,7 +18,7 @@ ENV SPARK_VERSION=3.5.2
 ENV HADOOP_VERSION=3
 ENV SPARK_HOME=/opt/spark
 
-COPY downloads/spark-3.5.2-bin-hadoop3-scala2.13.tgz /tmp/spark.tgz
+COPY downloads/spark-3.5.2-bin-hadoop3.tgz /tmp/spark.tgz
 RUN mkdir -p ${SPARK_HOME} \
     && tar -xf /tmp/spark.tgz -C ${SPARK_HOME} --strip-components=1 \
     && rm /tmp/spark.tgz

@@ -149,6 +149,24 @@ services:
     networks:
       - hadoop-network
 
+  spark-worker:
+    build:
+      context: .
+      dockerfile: spark.Dockerfile
+    container_name: spark-worker
+    hostname: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_CORES=4
+      - SPARK_WORKER_MEMORY=4g
+    depends_on:
+      - spark
+    ports:
+      - "8082:8081"
+    networks:
+      - hadoop-network
+
   resourcemanager:
     build:
       context: .

@@ -7,9 +7,10 @@ mkdir -p "$DOWNLOAD_DIR"
 echo "Downloading dependencies into $DOWNLOAD_DIR..."
 
 # --- Apache Spark ---
-if [ ! -f "$DOWNLOAD_DIR/spark-3.5.2-bin-hadoop3-scala2.13.tgz" ]; then
+# Scala 2.12 build: matches Livy 0.8.0-incubating, which only ships 2.12 repl/rsc jars.
+if [ ! -f "$DOWNLOAD_DIR/spark-3.5.2-bin-hadoop3.tgz" ]; then
     echo "Downloading Spark 3.5.2..."
-    curl -L https://archive.apache.org/dist/spark/spark-3.5.2/spark-3.5.2-bin-hadoop3-scala2.13.tgz -o "$DOWNLOAD_DIR/spark-3.5.2-bin-hadoop3-scala2.13.tgz"
+    curl -L https://archive.apache.org/dist/spark/spark-3.5.2/spark-3.5.2-bin-hadoop3.tgz -o "$DOWNLOAD_DIR/spark-3.5.2-bin-hadoop3.tgz"
 fi
 
 # --- Hadoop ---
@@ -25,9 +26,9 @@ if [ ! -f "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating_2.12-bin.zip" ]; then
 fi
 
 # --- Delta Lake JARs ---
-if [ ! -f "$DOWNLOAD_DIR/delta-spark_2.13-3.2.0.jar" ]; then
+if [ ! -f "$DOWNLOAD_DIR/delta-spark_2.12-3.2.0.jar" ]; then
     echo "Downloading Delta Spark JAR..."
-    curl -L https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/3.2.0/delta-spark_2.13-3.2.0.jar -o "$DOWNLOAD_DIR/delta-spark_2.13-3.2.0.jar"
+    curl -L https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.0/delta-spark_2.12-3.2.0.jar -o "$DOWNLOAD_DIR/delta-spark_2.12-3.2.0.jar"
 fi
 
 if [ ! -f "$DOWNLOAD_DIR/delta-storage-3.2.0.jar" ]; then
