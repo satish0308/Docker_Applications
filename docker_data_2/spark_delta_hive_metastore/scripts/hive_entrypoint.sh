@@ -1,11 +1,11 @@
 #!/bin/bash
-set -e  # Exit on error
+set -e
 
 LOG_FILE="/var/log/hadoop_entrypoint.log"
-exec > >(tee -a $LOG_FILE) 2>&1  # Log all output
+exec > >(tee -a $LOG_FILE) 2>&1
 
 echo "========================================"
-echo "🚀 Starting Hadoop & Hive Initialization"
+echo "🚀 Starting Hadoop & Hive Initialization (Robust)"
 echo "========================================"
 
 # Set environment variables
@@ -14,9 +14,24 @@ export PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
-# Start SSH
-echo "🚀 Starting SSH service..."
+# --- Robust SSH Setup for hdfs user ---
+echo "🔄 Setting up SSH for hdfs..."
 service ssh start
+mkdir -p /home/hdfs/.ssh
+# Ensure ownership is correct
+chown -R hdfs:hadoop /home/hdfs/.ssh
+chmod 700 /home/hdfs/.ssh
+
+# Generate key if missing
+if [ ! -f /home/hdfs/.ssh/id_rsa ]; then
+    sudo -u hdfs ssh-keygen -t rsa -b 4096 -N "" -f /home/hdfs/.ssh/id_rsa
+fi
+
+# Authorize key
+cat /home/hdfs/.ssh/id_rsa.pub > /home/hdfs/.ssh/authorized_keys
+chmod 600 /home/hdfs/.ssh/authorized_keys
+chown hdfs:hadoop /home/hdfs/.ssh/authorized_keys
+ssh-keyscan -H localhost >> /home/hdfs/.ssh/known_hosts
 
 # Wait for postgres
 echo "Waiting for postgres to be ready..."
@@ -42,9 +57,9 @@ hive --service metastore > /var/log/metastore.log 2>&1 &
 echo "🚀 Starting HiveServer2..."
 export HADOOP_OPTS="$HADOOP_OPTS -Xmx1024m"
 
-# Wait for Metastore to be ready
-echo "Waiting for Metastore..."
-sleep 20 
+# Kill existing
+pkill -f HiveServer2 || true
+sleep 5
 
 # Run in foreground
 exec hive --service hiveserver2
