@@ -30,6 +30,10 @@ ENV PATH=$LIVY_HOME/bin:$SPARK_HOME/bin:$PATH
 COPY --from=builder /opt/livy /opt/livy
 COPY --from=builder /opt/spark /opt/spark
 
+# Copy configuration files
+COPY livy/conf/livy.conf /opt/livy/conf/
+COPY livy/conf/livy-env.sh /opt/livy/conf/
+
 EXPOSE 8998
 
 ENTRYPOINT ["/opt/livy/bin/livy-server"]
