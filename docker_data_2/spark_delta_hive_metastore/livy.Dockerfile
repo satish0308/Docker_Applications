@@ -28,7 +28,9 @@ FROM python:3.11-slim
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre-headless \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/log/livy && \
+    chmod 777 /var/log/livy
 
 ENV LIVY_HOME=/opt/livy
 ENV SPARK_HOME=/opt/spark
