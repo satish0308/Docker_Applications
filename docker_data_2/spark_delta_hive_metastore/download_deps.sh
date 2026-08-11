@@ -18,10 +18,10 @@ if [ ! -f "$DOWNLOAD_DIR/hadoop-3.4.0.tar.gz" ]; then
     curl -L https://archive.apache.org/dist/hadoop/common/hadoop-3.4.0/hadoop-3.4.0.tar.gz -o "$DOWNLOAD_DIR/hadoop-3.4.0.tar.gz"
 fi
 
-# --- Apache Hive ---
-if [ ! -f "$DOWNLOAD_DIR/apache-hive-4.0.0-bin.tar.gz" ]; then
-    echo "Downloading Hive 4.0.0..."
-    curl -L https://archive.apache.org/dist/hive/hive-4.0.0/apache-hive-4.0.0-bin.tar.gz -o "$DOWNLOAD_DIR/apache-hive-4.0.0-bin.tar.gz"
+# --- Apache Livy ---
+if [ ! -f "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz" ]; then
+    echo "Downloading Livy 0.8.0..."
+    curl -L https://archive.apache.org/dist/incubator/livy/0.8.0-incubating/apache-livy-0.8.0-incubating-bin.tar.gz -o "$DOWNLOAD_DIR/apache-livy-0.8.0-incubating-bin.tar.gz"
 fi
 
 # --- Delta Lake JARs ---

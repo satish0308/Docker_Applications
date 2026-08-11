@@ -217,7 +217,7 @@ services:
   livy:
     build:
       context: .
-      dockerfile: spark.Dockerfile
+      dockerfile: livy.Dockerfile
     container_name: livy
     ports:
       - "8998:8998"
@@ -225,7 +225,6 @@ services:
       - spark
     networks:
       - hadoop-network
-    entrypoint: ["/opt/spark/bin/livy-server"]
 
   admin-panel:
     build:
