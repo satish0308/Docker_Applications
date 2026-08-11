@@ -227,6 +227,17 @@ services:
       - hadoop-network
     command: /opt/spark/bin/livy-server
 
+  admin-panel:
+    build:
+      context: ./admin_panel
+    container_name: admin-panel
+    ports:
+      - "8501:8501"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hadoop-network
+
 networks:
   hadoop-network:
     driver: bridge
