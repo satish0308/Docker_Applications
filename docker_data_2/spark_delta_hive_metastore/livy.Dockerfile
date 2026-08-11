@@ -19,7 +19,7 @@ FROM python:3.11-slim
 
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-11-jre-headless \
+    openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LIVY_HOME=/opt/livy
