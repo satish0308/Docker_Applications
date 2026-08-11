@@ -2,17 +2,17 @@
 FROM debian:bullseye-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    tar \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy tarball
-COPY downloads/apache-livy-0.8.0-incubating-bin.tar.gz /tmp/livy.tgz
+# Copy zip file
+COPY downloads/apache-livy-0.8.0-incubating_2.12-bin.zip /tmp/livy.zip
 
 # Extract Livy
 RUN mkdir -p /opt/livy && \
-    tar -xf /tmp/livy.tgz -C /opt/livy --strip-components=1 && \
-    rm /tmp/livy.tgz
+    unzip /tmp/livy.zip -d /opt && \
+    mv /opt/apache-livy-0.8.0-incubating_2.12-bin/* /opt/livy/ && \
+    rm -rf /opt/apache-livy-0.8.0-incubating_2.12-bin /tmp/livy.zip
 
 # Stage 2: Runtime
 FROM python:3.11-slim
