@@ -32,7 +32,7 @@ while true; do
             docker compose down
             
             echo "🏗️ Rebuilding images and starting stack..."
-            docker compose up -d --build --parallel
+            docker compose up -d --build
             
             echo "✅ Update and rebuild complete."
         else
