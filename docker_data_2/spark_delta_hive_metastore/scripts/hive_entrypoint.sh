@@ -14,6 +14,10 @@ export PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
+# Ensure groups exist
+groupadd -f hadoop
+groupadd -f hdfs
+
 # --- Robust SSH Setup for hdfs user ---
 echo "🔄 Setting up SSH for hdfs..."
 service ssh start
