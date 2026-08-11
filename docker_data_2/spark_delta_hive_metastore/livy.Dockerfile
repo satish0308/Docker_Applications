@@ -43,6 +43,7 @@ COPY --from=builder /opt/spark /opt/spark
 # Copy configuration files
 COPY livy/conf/livy.conf /opt/livy/conf/
 COPY livy/conf/livy-env.sh /opt/livy/conf/
+COPY livy/conf/log4j.properties /opt/livy/conf/
 
 EXPOSE 8998
 
