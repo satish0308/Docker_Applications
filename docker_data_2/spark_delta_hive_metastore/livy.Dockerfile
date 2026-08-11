@@ -23,10 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LIVY_HOME=/opt/livy
-ENV PATH=$LIVY_HOME/bin:$PATH
+ENV SPARK_HOME=/opt/spark
+ENV PATH=$LIVY_HOME/bin:$SPARK_HOME/bin:$PATH
 
-# Copy from builder
+# Copy Livy and Spark from builder
 COPY --from=builder /opt/livy /opt/livy
+COPY --from=builder /opt/spark /opt/spark
 
 EXPOSE 8998
 
