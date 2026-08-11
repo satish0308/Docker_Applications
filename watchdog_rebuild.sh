@@ -29,10 +29,10 @@ while true; do
         echo "🛑 Bringing down existing stack..."
         if [ -d "$COMPOSE_DIR" ]; then
             cd "$COMPOSE_DIR"
-            docker-compose down
+            docker compose down
             
             echo "🏗️ Rebuilding images and starting stack..."
-            docker-compose up -d --build --parallel
+            docker compose up -d --build --parallel
             
             echo "✅ Update and rebuild complete."
         else
