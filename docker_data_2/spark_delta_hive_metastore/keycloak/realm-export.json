@@ -1,0 +1,222 @@
+{
+  "realm": "bigdata",
+  "enabled": true,
+  "displayName": "BigData Platform",
+  "displayNameHtml": "<b>BigData</b> Platform IAM",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Administrator with full access"
+      },
+      {
+        "name": "data-engineer",
+        "description": "Data Engineer with read/write access to Spark, Hive, S3, HDFS"
+      },
+      {
+        "name": "analyst",
+        "description": "Data Analyst with read-only query access"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "name": "admins",
+      "path": "/admins",
+      "realmRoles": ["admin", "data-engineer", "analyst"]
+    },
+    {
+      "name": "engineers",
+      "path": "/engineers",
+      "realmRoles": ["data-engineer", "analyst"]
+    },
+    {
+      "name": "analysts",
+      "path": "/analysts",
+      "realmRoles": ["analyst"]
+    }
+  ],
+  "defaultGroups": ["/analysts"],
+  "clients": [
+    {
+      "clientId": "hue",
+      "name": "Hue Query Editor",
+      "description": "Hue Web Interface OIDC Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "hue-client-secret-123",
+      "redirectUris": [
+        "http://localhost:8888/*",
+        "http://127.0.0.1:8888/*",
+        "http://hue:8888/*",
+        "http://localhost:8888/oidc/callback/",
+        "http://127.0.0.1:8888/oidc/callback/"
+      ],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "minio",
+      "name": "MinIO S3 Storage",
+      "description": "MinIO S3 Console & STS OIDC Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "minio-client-secret-123",
+      "redirectUris": [
+        "http://localhost:9001/*",
+        "http://127.0.0.1:9001/*",
+        "http://minio:9001/*",
+        "http://localhost:9001/oauth_callback"
+      ],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "policy",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.value": "consoleAdmin",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "policy",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "jupyter",
+      "name": "JupyterLab Notebooks",
+      "description": "JupyterLab OIDC Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "jupyter-client-secret-123",
+      "redirectUris": [
+        "http://localhost:8889/*",
+        "http://127.0.0.1:8889/*",
+        "http://jupyter-notebook:8888/*"
+      ],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@bigdata.local",
+      "firstName": "BigData",
+      "lastName": "Admin",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin", "data-engineer", "analyst"],
+      "groups": ["/admins"]
+    },
+    {
+      "username": "satish",
+      "enabled": true,
+      "email": "satish@bigdata.local",
+      "firstName": "Satish",
+      "lastName": "Kumar",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "satish123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["data-engineer", "analyst"],
+      "groups": ["/engineers"]
+    },
+    {
+      "username": "analyst",
+      "enabled": true,
+      "email": "analyst@bigdata.local",
+      "firstName": "Data",
+      "lastName": "Analyst",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["analyst"],
+      "groups": ["/analysts"]
+    }
+  ]
+}

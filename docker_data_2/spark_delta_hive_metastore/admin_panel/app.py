@@ -45,7 +45,7 @@ def get_container_stats():
         if project == "spark_delta_hive_metastore" or c.name in [
             "namenode", "datanode", "hive-server", "hue", "spark", "spark-worker",
             "resourcemanager", "nodemanager", "minio", "jupyter-notebook", "livy",
-            "admin-panel", "hive-metastore-postgres", "pgadmin"
+            "admin-panel", "hive-metastore-postgres", "pgadmin", "keycloak"
         ]:
             health = get_service_health(c)
             data.append({
@@ -136,6 +136,7 @@ with tab1:
         st.link_button("🐘 HDFS NameNode", "http://localhost:9870")
         st.link_button("🧶 YARN Manager", "http://localhost:8088")
         st.link_button("🗄️ pgAdmin 4", "http://localhost:8081")
+        st.link_button("🔐 Keycloak IAM", "http://localhost:8080")
 
 with tab2:
     st.subheader("🧹 One-Click Cluster State & Memory Purge")

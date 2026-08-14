@@ -19,3 +19,6 @@ BEGIN
 END
 $$;
 GRANT ALL PRIVILEGES ON DATABASE hue TO hueuser;
+
+SELECT 'CREATE DATABASE keycloak' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\gexec
+GRANT ALL PRIVILEGES ON DATABASE keycloak TO hiveuser;
