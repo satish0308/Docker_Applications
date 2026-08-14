@@ -40,12 +40,22 @@ RUN pip uninstall -y pyspark && \
 
 RUN pip install --no-cache-dir pyspark pandas numpy
 
-# -------- Add Hadoop AWS & AWS SDK for S3A --------
+# -------- Add Hadoop AWS, AWS SDK, Delta Lake & Postgres JARs --------
 COPY downloads/hadoop-aws-3.3.4.jar ${SPARK_HOME}/jars/hadoop-aws-3.3.4.jar
 COPY downloads/aws-java-sdk-bundle-1.12.379.jar ${SPARK_HOME}/jars/aws-java-sdk-bundle-1.12.379.jar
+COPY downloads/delta-spark_2.12-3.2.0.jar ${SPARK_HOME}/jars/delta-spark.jar
+COPY downloads/delta-storage-3.2.0.jar ${SPARK_HOME}/jars/delta-storage.jar
+COPY downloads/postgresql-42.7.4.jar ${SPARK_HOME}/jars/postgresql.jar
 
+# -------- Copy Cluster Configurations --------
+COPY config/spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
+COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml
+COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
+
+USER root
+RUN mkdir -p /user/hive/warehouse && chmod -R 777 /user
 USER $NB_UID
 
 EXPOSE 7077 8888
 
-ENTRYPOINT ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--IdentityProvider.token=", "--ServerApp.password=", "--NotebookApp.token=", "--NotebookApp.password="]

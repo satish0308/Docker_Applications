@@ -52,10 +52,6 @@ services:
       - "2222:22"
     networks:
       - hadoop-network
-    extra_hosts:
-      - "namenode:172.18.0.2"
-      - "datanode:172.18.0.3"
-      - "resourcemanager:172.18.0.6"
 
   datanode:
     build:
@@ -74,10 +70,6 @@ services:
       - "2223:22"
     networks:
       - hadoop-network
-    extra_hosts:
-      - "namenode:172.18.0.2"
-      - "datanode:172.18.0.3"
-      - "resourcemanager:172.18.0.6"
 
   hive:
     build:
@@ -93,11 +85,16 @@ services:
       - POSTGRES_USER=hiveuser
       - POSTGRES_PASSWORD=hivepassword
       - TMPDIR=/tmp/gunicorn
+    volumes:
+      - ./scripts/hive_entrypoint.sh:/hive_entrypoint.sh:ro
+      - ./config/hive-site.xml:/home/hive/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/home/hadoop/etc/hadoop/core-site.xml:ro
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "10000"]
-      interval: 40s
-      timeout: 50s
-      retries: 5
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/10000'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     depends_on:
       - postgres
       - namenode
@@ -136,6 +133,10 @@ services:
       context: .
       dockerfile: spark.Dockerfile
     container_name: spark
+    volumes:
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
     depends_on:
       - postgres
       - namenode
@@ -155,6 +156,10 @@ services:
       dockerfile: spark.Dockerfile
     container_name: spark-worker
     hostname: spark-worker
+    volumes:
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark:7077
@@ -183,10 +188,6 @@ services:
     depends_on:
       - namenode
       - datanode
-    extra_hosts:
-      - "namenode:172.18.0.2"
-      - "datanode:172.18.0.3"
-      - "resourcemanager:172.18.0.6"
 
   nodemanager:
     build:
@@ -213,6 +214,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - ./minio/data:/data
     command: server /data --console-address ":9001"
     networks:
       - hadoop-network
@@ -229,6 +232,9 @@ services:
       - minio
     volumes:
       - ./python_scripts:/home/jovyan/work
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
     networks:
       - hadoop-network
 
@@ -237,6 +243,11 @@ services:
       context: .
       dockerfile: livy.Dockerfile
     container_name: livy
+    volumes:
+      - ./livy/conf/livy.conf:/opt/livy/conf/livy.conf:ro
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
     ports:
       - "8998:8998"
     depends_on:

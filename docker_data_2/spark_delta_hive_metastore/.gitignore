@@ -1,8 +1,46 @@
+# Database and Storage Data
 postgres/data/
+postgres/data/*
+postgres_backup/
+hadoop/namenode/data/
+hadoop/datanode/data/
+hadoop/
+minio/data/
+minio/
+
+# Downloads and Binaries
 downloads/
 downloads_binaries/
-hadoop/
-/downloads/
-venv
+*.tar.gz
+*.tgz
+*.zip
+*.jar
+
+# Data Files
+*.csv
+*.parquet
+*.orc
+*.avro
+*.jsonl
+output/
+python_scripts/output/
+
+# Python & Jupyter
+__pycache__/
+*.py[cod]
+*$py.class
+*.ipynb_checkpoints/
+.ipynb_checkpoints/
+venv/
+.venv/
+env/
+
+# Logs and Runtime
+*.log
+*.pid
+*.inprogress
+
+# IDE & OS files
 .idea/
-downloads
+.vscode/
+.DS_Store

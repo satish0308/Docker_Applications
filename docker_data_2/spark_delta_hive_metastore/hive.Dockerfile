@@ -21,8 +21,10 @@ RUN mkdir -p /opt/hive && \
     tar -xf /tmp/apache-hive-4.0.0-bin.tar.gz -C /opt/hive --strip-components=1 && \
     rm /tmp/apache-hive-4.0.0-bin.tar.gz
 
-# Copy Postgres Driver
-RUN cp /tmp/postgresql-42.7.4.jar /opt/hive/lib/postgresql-42.7.4.jar
+# Copy Postgres Driver and native Hadoop AWS S3A JARs
+RUN cp /tmp/postgresql-42.7.4.jar /opt/hive/lib/postgresql-42.7.4.jar && \
+    cp /opt/hadoop/share/hadoop/tools/lib/hadoop-aws-3.4.0.jar /opt/hive/lib/ && \
+    cp /opt/hadoop/share/hadoop/tools/lib/bundle-2.23.19.jar /opt/hive/lib/
 
 # Stage 2: Runtime
 FROM debian:bullseye-slim

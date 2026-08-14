@@ -6,18 +6,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy tarballs and jars
+# Copy spark tarball
 COPY downloads/spark-3.5.2-bin-hadoop3.tgz /tmp/spark.tgz
-COPY downloads/delta-spark_2.12-3.2.0.jar /opt/jars/delta-spark.jar
-COPY downloads/delta-storage-3.2.0.jar /opt/jars/delta-storage.jar
-COPY downloads/postgresql-42.7.4.jar /opt/jars/postgresql.jar
-COPY downloads/hadoop-aws-3.3.4.jar /opt/jars/hadoop-aws-3.3.4.jar
-COPY downloads/aws-java-sdk-bundle-1.12.379.jar /opt/jars/aws-java-sdk-bundle-1.12.379.jar
 
 # Setup Spark
 RUN mkdir -p /opt/spark && \
     tar -xf /tmp/spark.tgz -C /opt/spark --strip-components=1 && \
     rm /tmp/spark.tgz
+
+# Copy jars to Spark system jars directory
+COPY downloads/delta-spark_2.12-3.2.0.jar /opt/spark/jars/delta-spark.jar
+COPY downloads/delta-storage-3.2.0.jar /opt/spark/jars/delta-storage.jar
+COPY downloads/postgresql-42.7.4.jar /opt/spark/jars/postgresql.jar
+COPY downloads/hadoop-aws-3.3.4.jar /opt/spark/jars/hadoop-aws-3.3.4.jar
+COPY downloads/aws-java-sdk-bundle-1.12.379.jar /opt/spark/jars/aws-java-sdk-bundle-1.12.379.jar
+COPY downloads/delta-spark_2.12-3.2.0.jar /opt/jars/delta-spark.jar
+COPY downloads/delta-storage-3.2.0.jar /opt/jars/delta-storage.jar
+COPY downloads/postgresql-42.7.4.jar /opt/jars/postgresql.jar
+COPY downloads/hadoop-aws-3.3.4.jar /opt/jars/hadoop-aws-3.3.4.jar
+COPY downloads/aws-java-sdk-bundle-1.12.379.jar /opt/jars/aws-java-sdk-bundle-1.12.379.jar
 
 # Stage 2: Runtime
 FROM python:3.11-slim
@@ -65,17 +72,13 @@ RUN groupadd --gid $USER_GID $USERNAME && \
     echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Directories
-RUN mkdir -p /home/$USERNAME/app ${SPARK_HOME}/logs ${SPARK_HOME}/event_logs && \
+RUN mkdir -p /home/$USERNAME/app ${SPARK_HOME}/logs ${SPARK_HOME}/event_logs /user/hive/warehouse && \
+    chmod -R 777 /user && \
     chown -R $USER_UID:$USER_GID ${SPARK_HOME} /home/$USERNAME
 
 # Configs
-# spark.deploy.defaultCores caps how many cores a standalone app gets when it
-# doesn't request spark.cores.max itself (Livy's clients don't set it), so one
-# idle session can't grab every core in the cluster and starve the rest.
-RUN echo "spark.eventLog.enabled true" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
-    echo "spark.eventLog.dir file://${SPARK_HOME}/event_logs" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
-    echo "spark.history.fs.logDirectory file://${SPARK_HOME}/event_logs" >> ${SPARK_HOME}/conf/spark-defaults.conf && \
-    echo "spark.deploy.defaultCores 1" >> ${SPARK_HOME}/conf/spark-defaults.conf
+COPY config/spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
+RUN echo "spark.deploy.defaultCores 1" >> ${SPARK_HOME}/conf/spark-defaults.conf
 
 COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
 COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml

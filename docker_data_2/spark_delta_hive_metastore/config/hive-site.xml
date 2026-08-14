@@ -1,5 +1,9 @@
 <?xml version="1.0"?>
 <configuration>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://namenode:9000</value>
+    </property>
     <!-- JDBC connection string for PostgreSQL -->
     <property>
         <name>javax.jdo.option.ConnectionURL</name>
@@ -45,7 +49,7 @@
     <!-- Metastore warehouse location -->
     <property>
         <name>hive.metastore.warehouse.dir</name>
-        <value>/user/hive/warehouse</value>
+        <value>hdfs://namenode:9000/user/hive/warehouse</value>
         <description>Location of default database for the warehouse</description>
     </property>
 
@@ -54,8 +58,8 @@
         <value>true</value>
     </property>
     <property>
-    <name>hive.execution.engine</name>
-    <value>tez</value>  <!-- Use Tez instead of MapReduce -->
+        <name>hive.execution.engine</name>
+        <value>mr</value>
     </property>
 
     <property>

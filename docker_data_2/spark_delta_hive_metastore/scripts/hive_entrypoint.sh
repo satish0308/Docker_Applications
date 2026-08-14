@@ -40,14 +40,22 @@ ssh-keyscan -H localhost >> /home/hdfs/.ssh/known_hosts
 # Wait for postgres
 echo "Waiting for postgres to be ready..."
 until nc -z postgres 5432; do
-  sleep 5
+  sleep 2
 done
 
-# Start Hadoop services
-echo "🚀 Starting Hadoop services..."
-$HADOOP_HOME/sbin/start-dfs.sh
+# Wait for namenode
+echo "Waiting for namenode to be ready..."
+until nc -z namenode 9000; do
+  sleep 2
+done
 
-# Initialize Hive schema
+# Ensure HDFS is out of safemode and create directories
+echo "Ensuring HDFS safemode is OFF and scratch directories exist..."
+hdfs dfsadmin -safemode leave || true
+hdfs dfs -mkdir -p /tmp/hive /user/hive/warehouse || true
+hdfs dfs -chmod -R 777 /tmp /user || true
+
+# Initialize Hive schema if needed
 if ! schematool -info -dbType postgres > /dev/null 2>&1; then
     echo "🛠️ Initializing Hive Metastore schema..."
     schematool -initSchema -dbType postgres
@@ -57,13 +65,15 @@ fi
 echo "🚀 Starting Hive Metastore..."
 hive --service metastore > /var/log/metastore.log 2>&1 &
 
+# Wait for Metastore to listen on 9083
+echo "Waiting for Hive Metastore on port 9083..."
+until nc -z localhost 9083; do
+  sleep 2
+done
+echo "✅ Hive Metastore is ready on port 9083."
+
 # Start HiveServer2
 echo "🚀 Starting HiveServer2..."
 export HADOOP_OPTS="$HADOOP_OPTS -Xmx1024m"
 
-# Kill existing
-pkill -f HiveServer2 || true
-sleep 5
-
-# Run in foreground
 exec hive --service hiveserver2
