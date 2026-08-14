@@ -214,9 +214,17 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_IDENTITY_OPENID_CONFIG_URL: "http://keycloak:8080/realms/bigdata/.well-known/openid-configuration"
+      MINIO_IDENTITY_OPENID_CLIENT_ID: "minio"
+      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "minio-client-secret-123"
+      MINIO_IDENTITY_OPENID_SCOPES: "openid,profile,email"
+      MINIO_IDENTITY_OPENID_REDIRECT_URI: "http://localhost:9001/oauth_callback"
+      MINIO_IDENTITY_OPENID_DISPLAY_NAME: "Login with Keycloak SSO"
     volumes:
       - ./minio/data:/data
     command: server /data --console-address ":9001"
+    depends_on:
+      - keycloak
     networks:
       - hadoop-network
 
