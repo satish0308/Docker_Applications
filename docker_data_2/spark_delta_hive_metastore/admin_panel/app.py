@@ -9,6 +9,7 @@ import os
 import re
 import time
 import io
+import tarfile
 import psycopg2
 
 st.set_page_config(
@@ -26,6 +27,16 @@ except Exception as e:
     st.stop()
 
 # Helper Functions
+def copy_data_to_container(container, file_bytes, dest_dir, filename):
+    """Copies in-memory bytes directly to any container path using Docker API."""
+    tar_stream = io.BytesIO()
+    with tarfile.TarFile(fileobj=tar_stream, mode='w') as tar:
+        tarinfo = tarfile.TarInfo(name=filename)
+        tarinfo.size = len(file_bytes)
+        tar.addfile(tarinfo, io.BytesIO(file_bytes))
+    tar_stream.seek(0)
+    container.put_archive(dest_dir, tar_stream.read())
+
 def sanitize_table_name(name):
     name = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower())
     if name and name[0].isdigit():
@@ -319,21 +330,20 @@ if menu == "📥 Data Ingestion & Table Creator":
             # Determine HDFS staging path
             if uploaded_file is not None:
                 staging_hdfs_path = f"/data/uploads/{uploaded_file.name}"
-                # Stream file directly into namenode HDFS
                 namenode_cont = client.containers.get("namenode")
                 namenode_cont.exec_run("hdfs dfs -mkdir -p /data/uploads")
                 
-                # Write file content to stdin of hdfs dfs -put
-                put_proc = subprocess.Popen(
-                    ["docker", "exec", "-i", "namenode", "hdfs", "dfs", "-put", "-f", "-", staging_hdfs_path],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
+                # Copy file into namenode /tmp directory via Docker SDK
                 uploaded_file.seek(0)
-                stdout, stderr = put_proc.communicate(input=uploaded_file.read())
-                if put_proc.returncode != 0:
-                    raise Exception(f"Failed to stage file to HDFS: {stderr.decode('utf-8')}")
+                file_bytes = uploaded_file.read()
+                copy_data_to_container(namenode_cont, file_bytes, "/tmp", uploaded_file.name)
+                
+                # Ingest to HDFS from container /tmp
+                put_res = namenode_cont.exec_run(f"hdfs dfs -put -f /tmp/{uploaded_file.name} {staging_hdfs_path}")
+                if put_res.exit_code != 0:
+                    err_msg = put_res.output.decode('utf-8', errors='ignore') if put_res.output else "Unknown HDFS error"
+                    raise Exception(f"Failed to stage file to HDFS: {err_msg}")
+                
                 source_path_for_spark = f"hdfs://namenode:9000{staging_hdfs_path}"
             else:
                 source_path_for_spark = input_file_path
@@ -406,19 +416,13 @@ spark.stop()
             status_text.info("⏳ Step 3/4: Executing distributed Spark ingestion & Metastore registration...")
             progress_bar.progress(70)
 
-            # Copy script into spark container and run
+            # Copy script into spark container via Python Docker SDK
             spark_cont = client.containers.get("spark")
-            script_path_in_spark = f"/tmp/ingest_{target_table}.py"
-            
-            # Put script via docker cp
-            subprocess.run(
-                ["docker", "exec", "-i", "spark", "sh", "-c", f"cat > {script_path_in_spark}"],
-                input=spark_script.encode('utf-8'),
-                check=True
-            )
+            script_filename = f"ingest_{target_table}.py"
+            copy_data_to_container(spark_cont, spark_script.encode('utf-8'), "/tmp", script_filename)
 
             res = spark_cont.exec_run(
-                f"/opt/spark/bin/spark-submit --driver-memory 2g --executor-memory 3g {script_path_in_spark}"
+                f"/opt/spark/bin/spark-submit --driver-memory 2g --executor-memory 3g /tmp/{script_filename}"
             )
             output = res.output.decode('utf-8', errors='ignore')
 
