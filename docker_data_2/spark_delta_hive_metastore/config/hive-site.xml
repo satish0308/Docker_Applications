@@ -81,6 +81,15 @@
     </property>
 
     <property>
+        <name>parquet.column.index.access</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>hive.parquet.timestamp.skip.conversion</name>
+        <value>false</value>
+    </property>
+
+    <property>
         <name>mapreduce.framework.name</name>
         <value>yarn</value>
     </property>

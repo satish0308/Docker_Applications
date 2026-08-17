@@ -365,6 +365,7 @@ if menu == "📥 Data Ingestion & Table Creator":
             # Build PySpark Ingestion Script
             spark_script = f"""
 import time
+import re
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder \\
@@ -391,6 +392,20 @@ df = spark.read.parquet("{source_path_for_spark}")
             elif file_format == "json":
                 spark_script += f"""
 df = spark.read.json("{source_path_for_spark}")
+"""
+
+            spark_script += f"""
+# Sanitize all column names for universal Hive, Parquet, and Hue SQL compatibility
+for c in df.columns:
+    clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+    clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+    if clean_c and clean_c[0].isdigit():
+        clean_c = f"col_{{clean_c}}"
+    clean_c = clean_c if clean_c else "unnamed_col"
+    if clean_c != c:
+        df = df.withColumnRenamed(c, clean_c)
+
+print(f"--> Normalized Columns: {{df.columns}}")
 """
 
             if is_delta:
