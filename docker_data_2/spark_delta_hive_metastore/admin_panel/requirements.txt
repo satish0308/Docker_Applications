@@ -1,3 +1,6 @@
-streamlit
+streamlit>=1.35.0
 docker
 pandas
+pyarrow
+psycopg2-binary
+requests
