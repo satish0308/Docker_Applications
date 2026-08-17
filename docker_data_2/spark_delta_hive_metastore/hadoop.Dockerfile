@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY downloads/hadoop-3.4.0.tar.gz /tmp/hadoop-3.4.0.tar.gz
 RUN mkdir -p /opt/hadoop && \
     tar -xf /tmp/hadoop-3.4.0.tar.gz -C /opt/hadoop --strip-components=1 && \
-    rm /tmp/hadoop-3.4.0.tar.gz
+    rm /tmp/hadoop-3.4.0.tar.gz && \
+    cp /opt/hadoop/share/hadoop/tools/lib/hadoop-aws-3.4.0.jar /opt/hadoop/share/hadoop/common/lib/ && \
+    cp /opt/hadoop/share/hadoop/tools/lib/bundle-2.23.19.jar /opt/hadoop/share/hadoop/common/lib/
 
 # Stage 2: Runtime
 FROM debian:bullseye-slim
