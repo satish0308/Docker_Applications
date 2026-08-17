@@ -62,6 +62,24 @@
         <value>mr</value>
     </property>
 
+    <!-- Fast Direct Execution without YARN MapReduce bottlenecks -->
+    <property>
+        <name>hive.fetch.task.conversion</name>
+        <value>more</value>
+    </property>
+    <property>
+        <name>hive.fetch.task.conversion.threshold</name>
+        <value>1073741824</value>
+    </property>
+    <property>
+        <name>hive.exec.mode.local.auto</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>hive.exec.mode.local.auto.inputbytes.max</name>
+        <value>1073741824</value>
+    </property>
+
     <property>
         <name>mapreduce.framework.name</name>
         <value>yarn</value>
