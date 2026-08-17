@@ -85,10 +85,16 @@ services:
       - POSTGRES_USER=hiveuser
       - POSTGRES_PASSWORD=hivepassword
       - TMPDIR=/tmp/gunicorn
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin123
+      - AWS_REGION=us-east-1
     volumes:
       - ./scripts/hive_entrypoint.sh:/hive_entrypoint.sh:ro
       - ./config/hive-site.xml:/home/hive/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/home/hive/conf/core-site.xml:ro
       - ./config/core-site.xml:/home/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/mapred-site.xml:/home/hadoop/etc/hadoop/mapred-site.xml:ro
+      - ./config/yarn-site.xml:/home/hadoop/etc/hadoop/yarn-site.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/10000'"]
       interval: 15s
@@ -181,6 +187,11 @@ services:
     environment:
       - YARN_RESOURCEMANAGER_HOST=resourcemanager
       - YARN_NODEMANAGER_HOST=nodemanager
+    volumes:
+      - ./config/core-site.xml:/home/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hdfs-site.xml:/home/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./config/yarn-site.xml:/home/hadoop/etc/hadoop/yarn-site.xml:ro
+      - ./config/mapred-site.xml:/home/hadoop/etc/hadoop/mapred-site.xml:ro
     ports:
       - "8088:8088"
     networks:
@@ -198,6 +209,11 @@ services:
     environment:
       - YARN_RESOURCEMANAGER_HOST=resourcemanager
       - YARN_NODEMANAGER_HOST=nodemanager
+    volumes:
+      - ./config/core-site.xml:/home/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hdfs-site.xml:/home/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./config/yarn-site.xml:/home/hadoop/etc/hadoop/yarn-site.xml:ro
+      - ./config/mapred-site.xml:/home/hadoop/etc/hadoop/mapred-site.xml:ro
     ports:
       - "8042:8042"
     networks:

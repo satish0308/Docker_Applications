@@ -19,8 +19,13 @@
     </property>
 
     <property>
+        <name>yarn.application.classpath</name>
+        <value>/home/hadoop/etc/hadoop,/home/hadoop/share/hadoop/common/*,/home/hadoop/share/hadoop/common/lib/*,/home/hadoop/share/hadoop/hdfs/*,/home/hadoop/share/hadoop/hdfs/lib/*,/home/hadoop/share/hadoop/mapreduce/*,/home/hadoop/share/hadoop/mapreduce/lib/*,/home/hadoop/share/hadoop/yarn/*,/home/hadoop/share/hadoop/yarn/lib/*</value>
+    </property>
+
+    <property>
         <name>yarn.nodemanager.resource.memory-mb</name>
-        <value>2096</value>  <!-- Adjust based on available memory -->
+        <value>4096</value>
     </property>
 
     <property>
