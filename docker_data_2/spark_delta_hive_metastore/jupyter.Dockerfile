@@ -53,7 +53,8 @@ COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml
 COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
 
 USER root
-RUN mkdir -p /user/hive/warehouse && chmod -R 777 /user
+RUN mkdir -p /user/hive/warehouse /opt/spark/event_logs /tmp/spark-events && \
+    chmod -R 777 /user /opt/spark/event_logs /tmp/spark-events
 USER $NB_UID
 
 EXPOSE 7077 8888
