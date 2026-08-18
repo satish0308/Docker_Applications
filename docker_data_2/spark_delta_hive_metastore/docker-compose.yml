@@ -259,7 +259,7 @@ services:
       - minio
     volumes:
       - ./python_scripts:/home/jovyan/work
-      - ./scripts/00-spark-init.py:/home/jovyan/.ipython/profile_default/startup/00-spark-init.py:ro
+      - ./scripts:/opt/spark/scripts:ro
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro

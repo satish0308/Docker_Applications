@@ -53,24 +53,43 @@ COPY config/core-site.xml ${SPARK_HOME}/conf/core-site.xml
 COPY config/hive-site.xml ${SPARK_HOME}/conf/hive-site.xml
 
 USER root
-RUN mkdir -p /user/hive/warehouse /opt/spark/event_logs /tmp/spark-events /home/jovyan/.ipython/profile_default/startup && \
-    chmod -R 777 /user /opt/spark/event_logs /tmp/spark-events /home/jovyan/.ipython
+RUN mkdir -p /user/hive/warehouse /opt/spark/event_logs /tmp/spark-events /opt/spark/scripts /usr/local/share/jupyter/kernels/pyspark /usr/local/share/jupyter/kernels/python3 && \
+    chmod -R 777 /user /opt/spark /tmp/spark-events /home/jovyan
 
-RUN cat << "EOF" > /home/jovyan/.ipython/profile_default/startup/00-spark-init.py
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
+RUN cat << 'EOF' > /usr/local/share/jupyter/kernels/python3/kernel.json
+{
+ "argv": [
+  "python",
+  "-m",
+  "ipykernel_launcher",
+  "--IPKernelApp.exec_files=['/opt/spark/scripts/00-spark-init.py']",
+  "-f",
+  "{connection_file}"
+ ],
+ "display_name": "Python 3 (PySpark Auto-Init)",
+ "language": "python",
+ "metadata": {
+  "debugger": true
+ }
+}
+EOF
 
-try:
-    spark = SparkSession.builder \
-        .appName("JupyterLab_Interactive") \
-        .config("spark.driver.memory", "2g") \
-        .config("spark.executor.memory", "2g") \
-        .enableHiveSupport() \
-        .getOrCreate()
-    sc = spark.sparkContext
-    print("⚡ [Auto-Init] Apache Spark & Hive Metastore session ready as `spark`!")
-except Exception as e:
-    print(f"⚠️ PySpark init note: {e}")
+RUN cat << 'EOF' > /usr/local/share/jupyter/kernels/pyspark/kernel.json
+{
+ "argv": [
+  "python",
+  "-m",
+  "ipykernel_launcher",
+  "--IPKernelApp.exec_files=['/opt/spark/scripts/00-spark-init.py']",
+  "-f",
+  "{connection_file}"
+ ],
+ "display_name": "PySpark 3.5.2 (Hive & Delta)",
+ "language": "python",
+ "metadata": {
+  "debugger": true
+ }
+}
 EOF
 
 USER $NB_UID
