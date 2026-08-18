@@ -862,7 +862,8 @@ elif menu == "📦 Table Backup & Restore":
                     status_text.empty()
                     
                     if code == 0 and "__BACKUP_RESULT__|" in out:
-                        manifest_json = json.loads(out.split("__BACKUP_RESULT__|")[1].strip())
+                        raw_json_line = out.split("__BACKUP_RESULT__|")[1].strip().splitlines()[0].strip()
+                        manifest_json = json.loads(raw_json_line)
                         st.success(f"🎉 Backup `{manifest_json['backup_id']}` completed with 100% integrity!")
                         
                         col_bkr1, col_bkr2, col_bkr3, col_bkr4 = st.columns(4)
@@ -898,7 +899,8 @@ elif menu == "📦 Table Backup & Restore":
                 status_text.empty()
 
                 if code == 0 and "__BACKUP_RESULT__|" in out:
-                    db_manifest = json.loads(out.split("__BACKUP_RESULT__|")[1].strip())
+                    raw_db_json_line = out.split("__BACKUP_RESULT__|")[1].strip().splitlines()[0].strip()
+                    db_manifest = json.loads(raw_db_json_line)
                     st.success(f"🎉 Complete Database Backup `{db_manifest['backup_id']}` created successfully with 100% integrity!")
 
                     col_dbm1, col_dbm2, col_dbm3, col_dbm4 = st.columns(4)
@@ -1063,7 +1065,8 @@ elif menu == "📦 Table Backup & Restore":
                 status_text.empty()
 
                 if code == 0 and "__RESTORE_RESULT__|" in out:
-                    res_json = json.loads(out.split("__RESTORE_RESULT__|")[1].strip())
+                    raw_res_line = out.split("__RESTORE_RESULT__|")[1].strip().splitlines()[0].strip()
+                    res_json = json.loads(raw_res_line)
                     if is_db_restore:
                         st.success(f"🎉 Database `{res_json['database']}` restored successfully ({res_json['total_rows_restored']:,} total rows across {len(res_json.get('tables_restored', {}))} tables)!")
                         col_rr1, col_rr2 = st.columns(2)
