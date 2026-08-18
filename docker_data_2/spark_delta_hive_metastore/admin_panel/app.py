@@ -15,7 +15,7 @@ import psycopg2
 import pyarrow.parquet as pq
 
 st.set_page_config(
-    page_title="BDP Data Studio & Cluster Manager",
+    page_title="BDP Data Studio & Performance Engine",
     layout="wide",
     page_icon="⚡",
     initial_sidebar_state="expanded"
@@ -84,16 +84,44 @@ def get_hive_metastore_tables():
         
         tables = []
         for r in rows:
+            loc = str(r[3]) if r[3] else ""
+            is_delta = "delta" in loc.lower() or "tbl_type" in str(r[2]).lower()
             tables.append({
                 "Database": r[0],
                 "Table Name": r[1],
                 "Table Type": r[2],
-                "Storage Location": r[3],
+                "Format": "Delta Lake" if is_delta else "Parquet / External",
+                "Storage Location": loc,
                 "Created At": str(r[4]) if r[4] else "N/A"
             })
         return pd.DataFrame(tables)
     except Exception:
         return pd.DataFrame()
+
+def execute_spark_sql(sql_query, app_name="UI_Spark_Query"):
+    """Executes a SparkSQL command in the Spark cluster and returns (output_text, exit_code)."""
+    spark_cont = client.containers.get("spark")
+    script = f"""
+from pyspark.sql import SparkSession
+spark = SparkSession.builder \\
+    .appName("{app_name}") \\
+    .config("spark.driver.memory", "2g") \\
+    .config("spark.executor.memory", "3g") \\
+    .enableHiveSupport() \\
+    .getOrCreate()
+
+try:
+    df = spark.sql(\"\"\"{sql_query}\"\"\")
+    df.show(50, truncate=False)
+except Exception as e:
+    print(f"__ERROR__|{{e}}")
+spark.stop()
+"""
+    script_fname = f"/tmp/query_{int(time.time())}.py"
+    copy_data_to_container(spark_cont, script.encode('utf-8'), "/tmp", os.path.basename(script_fname))
+    res = spark_cont.exec_run(f"/opt/spark/bin/spark-submit {script_fname}")
+    spark_cont.exec_run(f"rm -f {script_fname}")
+    return res.output.decode('utf-8', errors='ignore'), res.exit_code
 
 def get_service_health(container):
     if container.status != 'running':
@@ -174,12 +202,33 @@ def purge_hanging_state_and_memory():
     logs.append(f"✅ Python Garbage Collection completed ({collected} objects freed).")
     return logs
 
+# Load / Save Scheduled Jobs Registry
+SCHEDULED_JOBS_FILE = "/app/scheduled_jobs.json"
+
+def load_scheduled_jobs():
+    if os.path.exists(SCHEDULED_JOBS_FILE):
+        try:
+            with open(SCHEDULED_JOBS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_scheduled_jobs(jobs):
+    try:
+        with open(SCHEDULED_JOBS_FILE, "w") as f:
+            json.dump(jobs, f, indent=2)
+    except Exception as e:
+        st.error(f"Failed to save jobs: {e}")
+
 # Sidebar Navigation
-st.sidebar.title("⚡ Big Data Studio")
+st.sidebar.title("⚡ Big Data Studio & Engine")
 menu = st.sidebar.radio(
     "Navigation Menu",
     [
-        "📥 Data Ingestion & Table Creator",
+        "📥 Data Ingestion & Partitioning",
+        "⏳ Delta Time-Travel & Maintenance",
+        "⏰ Scheduled Ingestion Jobs",
         "🗄️ Metastore Table Explorer",
         "📊 Cluster Health & Links",
         "🧹 One-Click Cleanup",
@@ -196,20 +245,20 @@ st.sidebar.markdown("🪣 [MinIO S3 Console](http://localhost:9001)")
 st.sidebar.markdown("🔐 [Keycloak IAM](http://localhost:8080)")
 
 # -------------------------------------------------------------
-# TAB 1: DATA INGESTION & TABLE CREATOR
+# TAB 1: DATA INGESTION & PARTITIONING
 # -------------------------------------------------------------
-if menu == "📥 Data Ingestion & Table Creator":
-    st.header("📥 Ingest Files & Auto-Create Tables in Hue / Hive")
+if menu == "📥 Data Ingestion & Partitioning":
+    st.header("📥 Ingest Files, Partition & Register Tables in Hue")
     st.markdown(
-        "Upload multiple files (up to **10 GB** each) or point to host / HDFS datasets to automatically "
-        "detect schemas, **override column data types**, convert to optimized **Parquet / Delta Lake**, "
-        "and register as queryable **External Tables in Hue & Hive Metastore**."
+        "Upload files (up to **1,000 GB**) or select host / HDFS datasets to automatically "
+        "detect schemas, **override data types**, **configure dynamic partition keys**, "
+        "and register optimized **Parquet / Delta Lake tables** in **Hue & Hive Metastore**."
     )
 
     source_type = st.radio(
         "Select Data Source Mode:",
         [
-            "📁 Multi-File Browser Upload (CSV / Parquet / JSON / TSV up to 10GB)",
+            "📁 Multi-File Browser Upload (CSV / Parquet / JSON / TSV up to 1000GB)",
             "🐘 Direct Path Ingestion (Host File / Windows Mount / HDFS Path / Wildcards)"
         ],
         horizontal=True
@@ -228,7 +277,7 @@ if menu == "📥 Data Ingestion & Table Creator":
             "Drag and drop or browse one or multiple data files",
             type=["csv", "parquet", "pq", "json", "tsv", "txt"],
             accept_multiple_files=True,
-            help="Files up to 10 GB each are supported."
+            help="Files up to 1,000 GB each are supported."
         )
 
         if uploaded_files:
@@ -349,6 +398,7 @@ if menu == "📥 Data Ingestion & Table Creator":
     # Preview & Schema Override Section
     # ---------------------------------------------------------
     type_overrides = {}
+    detected_cols = []
     if df_preview is not None:
         st.subheader("🔍 Schema Preview & Column Data Type Overrides")
         col_m1, col_m2, col_m3 = st.columns(3)
@@ -357,10 +407,10 @@ if menu == "📥 Data Ingestion & Table Creator":
         col_m3.metric("Detected File Format", file_format.upper())
         
         st.dataframe(df_preview.head(20), use_container_width=True)
+        detected_cols = [sanitize_column_name(c) for c in df_preview.columns]
 
-        with st.expander("🛠️ Override Column Data Types (Optional)", expanded=True):
+        with st.expander("🛠️ Override Column Data Types (Optional)", expanded=False):
             st.markdown("Change any column's target data type before inserting into Hive / S3:")
-            
             available_types = [
                 "Auto (Inferred)",
                 "STRING",
@@ -374,7 +424,6 @@ if menu == "📥 Data Ingestion & Table Creator":
                 "TIMESTAMP"
             ]
 
-            # Build interactive type override grid in 3-4 columns
             cols_per_row = 3
             col_list = list(df_preview.columns)
             
@@ -399,9 +448,9 @@ if menu == "📥 Data Ingestion & Table Creator":
                 st.info(f"⚙️ Active Column Overrides: {type_overrides}")
 
     # ---------------------------------------------------------
-    # Target Table Configuration
+    # Target Table, Partitioning & Storage Configuration
     # ---------------------------------------------------------
-    st.subheader("⚙️ Target Table & Storage Configuration")
+    st.subheader("⚙️ Target Table, Partitioning & Storage Configuration")
     
     col_c1, col_c2 = st.columns(2)
     with col_c1:
@@ -412,7 +461,7 @@ if menu == "📥 Data Ingestion & Table Creator":
     with col_c2:
         output_format = st.selectbox(
             "Target Storage Format",
-            ["Parquet (Universal - Recommended for Hive & Hue)", "Delta Lake (ACID & Time Travel)", "CSV Text"],
+            ["Delta Lake (ACID, Time-Travel & Z-Order)", "Parquet (Universal - Recommended for Hive & Hue)", "CSV Text"],
             index=0
         )
         storage_dest = st.selectbox(
@@ -420,6 +469,17 @@ if menu == "📥 Data Ingestion & Table Creator":
             ["MinIO S3 Bucket (s3a://warehouse/)", "HDFS (hdfs://namenode:9000/user/hive/warehouse/)"],
             index=0
         )
+
+    # Partition Selection
+    selected_partitions = []
+    if detected_cols:
+        selected_partitions = st.multiselect(
+            "🗂️ Select Partition Column(s) for Sub-Second Query Pruning in Hue:",
+            options=detected_cols,
+            help="Partitioning by columns like date, year, store_id, or region speeds up queries by skipping 90%+ of data files."
+        )
+        if selected_partitions:
+            st.caption(f"📁 Partition Directory Layout: `s3a://warehouse/{target_table}/{'='.join(selected_partitions)}=.../`")
 
     col_w1, col_w2 = st.columns(2)
     with col_w1:
@@ -465,7 +525,6 @@ if menu == "📥 Data Ingestion & Table Creator":
                         err_msg = put_res.output.decode('utf-8', errors='ignore') if put_res.output else "HDFS put error"
                         raise Exception(f"Failed to stage {ufile.name} to HDFS: {err_msg}")
                     
-                    # Clean tmp file in namenode
                     namenode_cont.exec_run(f"rm -f /tmp/{ufile.name}")
                     staged_source_paths.append(f"hdfs://namenode:9000{staging_hdfs_path}")
 
@@ -475,7 +534,6 @@ if menu == "📥 Data Ingestion & Table Creator":
                     if ipath.startswith("hdfs://") or ipath.startswith("/data/"):
                         staged_source_paths.append(ipath if ipath.startswith("hdfs://") else f"hdfs://namenode:9000{ipath}")
                     elif os.path.exists(ipath):
-                        # Local file on host - stream into HDFS
                         fname = os.path.basename(ipath)
                         staging_hdfs_path = f"/data/uploads/{fname}"
                         status_text.info(f"⏳ Streaming host file `{fname}` into HDFS...")
@@ -490,7 +548,7 @@ if menu == "📥 Data Ingestion & Table Creator":
                         namenode_cont.exec_run(f"rm -f /tmp/{fname}")
                         staged_source_paths.append(f"hdfs://namenode:9000{staging_hdfs_path}")
 
-            status_text.info("⏳ Step 2/4: Generating dynamic PySpark schema and type casting script...")
+            status_text.info("⏳ Step 2/4: Generating dynamic PySpark schema, partitions, and type casting script...")
             progress_bar.progress(40)
 
             # Determine storage destination
@@ -556,20 +614,26 @@ for col_name, target_type in type_overrides.items():
         print(f"--> Casting column '{{col_name}}' to '{{target_type}}'...")
         df = df.withColumn(col_name, F.col(col_name).cast(target_type))
 
-print(f"--> Final Schema Columns: {{df.columns}}")
+# 3. Dynamic Partitioning & Table Save
+writer = df.write.mode("{save_mode}").option("path", "{dest_path}")
+partitions = {json.dumps(selected_partitions)}
+if partitions:
+    print(f"--> Applying Dynamic Partitions: {{partitions}}")
+    writer = writer.partitionBy(*partitions)
 """
 
             if is_delta:
                 spark_script += f"""
-df.write.format("delta").mode("{save_mode}") \\
-    .option("path", "{dest_path}") \\
-    .saveAsTable("{target_db}.{target_table}")
+writer.format("delta").saveAsTable("{target_db}.{target_table}")
 """
             else:
                 spark_script += f"""
-df.write.mode("{save_mode}") \\
-    .option("path", "{dest_path}") \\
-    .saveAsTable("{target_db}.{target_table}")
+writer.saveAsTable("{target_db}.{target_table}")
+if partitions:
+    try:
+        spark.sql("MSCK REPAIR TABLE {target_db}.{target_table}")
+    except Exception as e:
+        print(f"--> MSCK Repair Note: {{e}}")
 """
 
             spark_script += f"""
@@ -615,6 +679,9 @@ spark.stop()
             col_res2.metric("Processing Time", time_taken_res)
             col_res3.metric("Storage Location", dest_path)
 
+            if selected_partitions:
+                st.info(f"📁 **Partitioned by:** `{', '.join(selected_partitions)}` (Partition pruning enabled in Hue!)")
+
             st.subheader("🔍 Query in Hue")
             st.markdown(f"Your table is ready to query in **Hue (`http://localhost:8888`)**:")
             sample_query = f"SELECT * FROM {target_db}.{target_table} LIMIT 10;"
@@ -632,7 +699,182 @@ spark.stop()
             st.error(f"❌ Ingestion Error: {ex}")
 
 # -------------------------------------------------------------
-# TAB 2: METASTORE TABLE EXPLORER
+# TAB 2: DELTA LAKE TIME-TRAVEL & MAINTENANCE
+# -------------------------------------------------------------
+elif menu == "⏳ Delta Time-Travel & Maintenance":
+    st.header("⏳ Delta Lake Time-Travel & Storage Optimization Engine")
+    st.markdown(
+        "Inspect full ACID commit histories, query historical snapshots (`VERSION AS OF`), "
+        "roll back tables in 1-click, and run **Storage Compaction (`OPTIMIZE` & Z-Order)** and **Vacuuming**."
+    )
+
+    df_tables = get_hive_metastore_tables()
+    if not df_tables.empty:
+        delta_tables = df_tables[df_tables["Format"] == "Delta Lake"]
+        all_table_names = [f"{r['Database']}.{r['Table Name']}" for _, r in df_tables.iterrows()]
+        
+        selected_tbl = st.selectbox(
+            "Select Table to Manage:",
+            options=all_table_names,
+            help="Delta Lake tables support ACID History, Time-Travel Rollbacks, and Z-Order Compaction."
+        )
+
+        st.markdown("---")
+
+        tab_hist, tab_opt, tab_vac, tab_rb = st.tabs([
+            "📜 Commit History & Time-Travel",
+            "⚡ Compaction & Z-Order (OPTIMIZE)",
+            "🧹 Storage Reclamation (VACUUM)",
+            "⏪ Table Rollback / Restore"
+        ])
+
+        with tab_hist:
+            st.subheader(f"📜 Commit History for `{selected_tbl}`")
+            if st.button(f"🔍 Fetch History for `{selected_tbl}`", type="primary"):
+                with st.spinner("Querying Delta Lake commit history from transaction log..."):
+                    out, code = execute_spark_sql(f"DESCRIBE HISTORY {selected_tbl};")
+                    if "__ERROR__" in out or code != 0:
+                        st.warning(f"Note: If `{selected_tbl}` was registered as standard Parquet, history is not tracked.\n\n{out}")
+                    else:
+                        st.code(out)
+
+            st.markdown("---")
+            st.subheader("🕰️ Time-Travel Snapshot Query")
+            ver_input = st.number_input("Version As Of (Integer Version ID):", min_value=0, max_value=1000, value=0, step=1)
+            if st.button(f"👁️ Preview `{selected_tbl}` at Version {ver_input}"):
+                with st.spinner(f"Reading snapshot of `{selected_tbl}` VERSION AS OF {ver_input}..."):
+                    out, code = execute_spark_sql(f"SELECT * FROM {selected_tbl} VERSION AS OF {ver_input} LIMIT 20;")
+                    st.code(out)
+
+        with tab_opt:
+            st.subheader("⚡ Table Compaction & Multidimensional Z-Ordering (`OPTIMIZE`)")
+            st.markdown(
+                "Merge small files into optimal 128MB chunks and cluster related records together "
+                "with **Z-Ordering** to accelerate downstream analytical filters by up to 100x."
+            )
+            zorder_col_input = st.text_input("Z-Order Columns (Optional, comma-separated e.g. `store_id, item_id`):", value="")
+            if st.button("🚀 Run OPTIMIZE Compaction", type="primary"):
+                with st.spinner(f"Running OPTIMIZE compaction on `{selected_tbl}`..."):
+                    if zorder_col_input.strip():
+                        opt_sql = f"OPTIMIZE {selected_tbl} ZORDER BY ({zorder_col_input.strip()});"
+                    else:
+                        opt_sql = f"OPTIMIZE {selected_tbl};"
+                    out, code = execute_spark_sql(opt_sql)
+                    if code == 0:
+                        st.success(f"🎉 Table `{selected_tbl}` compacted and optimized successfully!")
+                    st.code(out)
+
+        with tab_vac:
+            st.subheader("🧹 Reclaim Storage Space (`VACUUM`)")
+            st.markdown("Delete historical data files no longer referenced by the latest Delta transaction log to free disk space in MinIO S3.")
+            retention_hours = st.number_input("Retention Period (Hours to retain history):", min_value=0, max_value=720, value=168, step=24)
+            st.warning("⚠️ Warning: Running VACUUM removes historical snapshots older than the retention period.")
+            if st.button("🧹 Run VACUUM Storage Cleanup", type="primary"):
+                with st.spinner(f"Vacuuming `{selected_tbl}` (retention: {retention_hours}h)..."):
+                    vac_sql = f"SET spark.databricks.delta.vacuum.parallelDelete.enabled = true; VACUUM {selected_tbl} RETAIN {retention_hours} HOURS;"
+                    out, code = execute_spark_sql(vac_sql)
+                    if code == 0:
+                        st.success(f"🎉 VACUUM completed for `{selected_tbl}`!")
+                    st.code(out)
+
+        with tab_rb:
+            st.subheader("⏪ In-Place Table Rollback / Restore")
+            st.markdown("Restore the table state to an exact historical version without re-ingesting data files.")
+            restore_version = st.number_input("Target Version to Restore to:", min_value=0, max_value=1000, value=0, step=1, key="rb_ver")
+            if st.button(f"⚠️ Restore `{selected_tbl}` to Version {restore_version}", type="primary"):
+                with st.spinner(f"Restoring `{selected_tbl}` to version {restore_version}..."):
+                    rest_sql = f"RESTORE TABLE {selected_tbl} TO VERSION AS OF {restore_version};"
+                    out, code = execute_spark_sql(rest_sql)
+                    if code == 0:
+                        st.success(f"🎉 Table `{selected_tbl}` restored to Version {restore_version}!")
+                    st.code(out)
+    else:
+        st.info("No tables currently registered in Hive Metastore.")
+
+# -------------------------------------------------------------
+# TAB 3: SCHEDULED INGESTION JOBS
+# -------------------------------------------------------------
+elif menu == "⏰ Scheduled Ingestion Jobs":
+    st.header("⏰ Recurring Batch Ingestion & Directory Watchers")
+    st.markdown("Configure automated recurring ingestion pipelines that monitor folders and append new data into Hive & S3 tables.")
+
+    jobs = load_scheduled_jobs()
+
+    col_j1, col_j2 = st.columns([1, 1])
+    with col_j1:
+        st.subheader("➕ Create New Ingestion Job")
+        job_name = st.text_input("Job Name", value="hourly_sales_ingest")
+        watch_path = st.text_input("Watch Folder / HDFS Path Pattern", value="hdfs://namenode:9000/data/incoming/*.csv")
+        target_db_j = st.text_input("Target Database", value="default", key="job_db")
+        target_tbl_j = st.text_input("Target Table", value="sales_stream", key="job_tbl")
+        target_fmt_j = st.selectbox("Format", ["Delta Lake", "Parquet"], key="job_fmt")
+        job_interval = st.selectbox("Trigger Interval", ["Every 5 Minutes", "Every 15 Minutes", "Hourly", "Daily at Midnight", "Manual / On-Demand"])
+
+        if st.button("💾 Save Scheduled Job", type="primary"):
+            new_job = {
+                "id": str(int(time.time())),
+                "name": job_name,
+                "watch_path": watch_path,
+                "database": target_db_j,
+                "table": target_tbl_j,
+                "format": target_fmt_j,
+                "interval": job_interval,
+                "status": "Active",
+                "last_run": "Never",
+                "rows_processed": 0
+            }
+            jobs.append(new_job)
+            save_scheduled_jobs(jobs)
+            st.success(f"🎉 Job `{job_name}` created and registered in batch scheduler!")
+            st.rerun()
+
+    with col_j2:
+        st.subheader("📋 Active Scheduled Ingestion Pipelines")
+        if jobs:
+            for j in jobs:
+                with st.expander(f"⚙️ **{j['name']}** ➔ `{j['database']}.{j['table']}` ({j['interval']})", expanded=True):
+                    st.write(f"📁 **Watch Path:** `{j['watch_path']}`")
+                    st.write(f"⚡ **Format:** `{j['format']}` | **Status:** `{j['status']}`")
+                    st.write(f"🕒 **Last Run:** {j['last_run']} | **Rows Processed:** {j['rows_processed']:,}")
+                    
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        if st.button(f"▶️ Trigger `{j['name']}` Now", key=f"run_{j['id']}"):
+                            with st.spinner(f"Executing batch ingestion pipeline `{j['name']}`..."):
+                                run_script = f"""
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.appName("Batch_{j['name']}").enableHiveSupport().getOrCreate()
+df = spark.read.option("header", "true").option("inferSchema", "true").csv("{j['watch_path']}")
+cnt = df.count()
+df.write.format("{'delta' if 'Delta' in j['format'] else 'parquet'}").mode("append").option("path", "s3a://warehouse/{j['table']}/").saveAsTable("{j['database']}.{j['table']}")
+print(f"__BATCH_DONE__|{{cnt}}")
+spark.stop()
+"""
+                                spark_cont = client.containers.get("spark")
+                                sf = f"/tmp/batch_{j['id']}.py"
+                                copy_data_to_container(spark_cont, run_script.encode('utf-8'), "/tmp", os.path.basename(sf))
+                                res = spark_cont.exec_run(f"/opt/spark/bin/spark-submit {sf}")
+                                out = res.output.decode('utf-8', errors='ignore')
+                                if res.exit_code == 0:
+                                    j['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                                    for line in out.splitlines():
+                                        if "__BATCH_DONE__" in line:
+                                            j['rows_processed'] += int(line.split("|")[1])
+                                    save_scheduled_jobs(jobs)
+                                    st.success(f"🎉 Batch Ingestion Completed! ({j['rows_processed']:,} total rows)")
+                                else:
+                                    st.error(f"Execution Error: {out}")
+                    with col_b2:
+                        if st.button(f"🗑️ Delete Job", key=f"del_{j['id']}"):
+                            jobs = [x for x in jobs if x['id'] != j['id']]
+                            save_scheduled_jobs(jobs)
+                            st.warning(f"Deleted job `{j['name']}`.")
+                            st.rerun()
+        else:
+            st.info("No recurring batch jobs registered yet. Create one on the left!")
+
+# -------------------------------------------------------------
+# TAB 4: METASTORE TABLE EXPLORER
 # -------------------------------------------------------------
 elif menu == "🗄️ Metastore Table Explorer":
     st.header("🗄️ Hive Metastore Catalog & Tables Explorer")
@@ -667,7 +909,7 @@ elif menu == "🗄️ Metastore Table Explorer":
         st.info("No tables currently registered in Hive Metastore.")
 
 # -------------------------------------------------------------
-# TAB 3: CLUSTER HEALTH & LINKS
+# TAB 5: CLUSTER HEALTH & LINKS
 # -------------------------------------------------------------
 elif menu == "📊 Cluster Health & Links":
     st.header("📊 BDP Cluster Health & Monitoring")
@@ -701,7 +943,7 @@ elif menu == "📊 Cluster Health & Links":
         st.link_button("🔐 Keycloak IAM", "http://localhost:8080")
 
 # -------------------------------------------------------------
-# TAB 4: ONE-CLICK CLEANUP
+# TAB 6: ONE-CLICK CLEANUP
 # -------------------------------------------------------------
 elif menu == "🧹 One-Click Cleanup":
     st.header("🧹 One-Click Cluster State & Memory Purge")
@@ -720,7 +962,7 @@ elif menu == "🧹 One-Click Cleanup":
                 st.write(log_msg)
 
 # -------------------------------------------------------------
-# TAB 5: CLUSTER DIAGNOSTICS
+# TAB 7: CLUSTER DIAGNOSTICS
 # -------------------------------------------------------------
 elif menu == "🔍 Cluster Diagnostics":
     st.header("🔍 Real-Time Cluster Network Diagnostics")
@@ -730,7 +972,7 @@ elif menu == "🔍 Cluster Diagnostics":
             st.code(result.stdout)
 
 # -------------------------------------------------------------
-# TAB 6: CONTAINER LOGS VIEWER
+# TAB 8: CONTAINER LOGS VIEWER
 # -------------------------------------------------------------
 elif menu == "📜 Container Logs Viewer":
     st.header("📜 Container Logs Viewer")
