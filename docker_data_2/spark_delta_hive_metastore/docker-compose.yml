@@ -143,6 +143,8 @@ services:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./python_scripts:/opt/spark/python_scripts
+      - ./scripts:/opt/spark/scripts
       - ./backups:/backups
     depends_on:
       - postgres
@@ -257,6 +259,7 @@ services:
       - minio
     volumes:
       - ./python_scripts:/home/jovyan/work
+      - ./scripts/00-spark-init.py:/home/jovyan/.ipython/profile_default/startup/00-spark-init.py:ro
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
@@ -289,6 +292,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./admin_panel:/app
+      - ./python_scripts:/app/python_scripts
+      - ./scripts:/app/scripts
       - ./backups:/backups
     networks:
       - hadoop-network
