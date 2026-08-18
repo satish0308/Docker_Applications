@@ -16,9 +16,9 @@ fi
 
 # Start Spark Master
 if [ "$SPARK_MODE" == "master" ]; then
-    echo "Starting Spark Master..."
+    echo "Starting Spark Master on host spark:7077..."
     exec $SPARK_HOME/bin/spark-class org.apache.spark.deploy.master.Master \
-        --host 0.0.0.0 \
+        --host spark \
         --port 7077 \
         --webui-port 8080
 fi

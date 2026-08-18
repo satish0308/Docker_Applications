@@ -139,10 +139,15 @@ services:
       context: .
       dockerfile: spark.Dockerfile
     container_name: spark
+    hostname: spark
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark
     volumes:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./scripts/start-spark.sh:/home/sparkuser/start-spark2.sh
       - ./python_scripts:/opt/spark/python_scripts
       - ./scripts:/opt/spark/scripts
       - ./backups:/backups
@@ -169,6 +174,7 @@ services:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./scripts/start-spark.sh:/home/sparkuser/start-spark2.sh
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark:7077
