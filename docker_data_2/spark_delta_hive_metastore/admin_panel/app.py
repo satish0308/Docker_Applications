@@ -304,25 +304,27 @@ def list_local_backups():
                 pass
     return backups
 
-def execute_backup_job(db_name, table_name, custom_id=None):
+def execute_backup_job(mode="table", db_name="default", table_name=None, custom_id=None):
     spark_cont = client.containers.get("spark")
-    cmd = f"python3 /opt/spark/backup_restore_table.py backup --table {db_name}.{table_name}"
-    if custom_id:
-        cmd += f" --backup-id {custom_id}"
-    
-    # Ensure backup script is in spark container
     with open("python_scripts/backup_restore_table.py", "rb") as f:
         copy_data_to_container(spark_cont, f.read(), "/opt/spark", "backup_restore_table.py")
+    if mode == "database":
+        cmd = f"/opt/spark/bin/spark-submit /opt/spark/backup_restore_table.py backup-db --database {db_name}"
+    else:
+        cmd = f"/opt/spark/bin/spark-submit /opt/spark/backup_restore_table.py backup --table {db_name}.{table_name}"
+    if custom_id:
+        cmd += f" --backup-id {custom_id}"
     res = spark_cont.exec_run(cmd)
     return res.output.decode('utf-8', errors='ignore'), res.exit_code
 
-def execute_restore_job(backup_id, target_db="default", target_table=None, storage_dest="s3a://warehouse/"):
+def execute_restore_job(backup_id, mode="table", target_db="default", target_table=None, storage_dest="s3a://warehouse/"):
     spark_cont = client.containers.get("spark")
     with open("python_scripts/backup_restore_table.py", "rb") as f:
         copy_data_to_container(spark_cont, f.read(), "/opt/spark", "backup_restore_table.py")
-    cmd = f"python3 /opt/spark/backup_restore_table.py restore --backup-id {backup_id} --storage-dest {storage_dest}"
-    if target_table:
-        cmd += f" --target-table {target_table}"
+    if mode == "database":
+        cmd = f"/opt/spark/bin/spark-submit /opt/spark/backup_restore_table.py restore-db --backup-id {backup_id} --database {target_db} --storage-dest {storage_dest}"
+    else:
+        cmd = f"/opt/spark/bin/spark-submit /opt/spark/backup_restore_table.py restore --backup-id {backup_id} --target-table {target_table if target_table else ''} --storage-dest {storage_dest}"
     res = spark_cont.exec_run(cmd)
     return res.output.decode('utf-8', errors='ignore'), res.exit_code
 
@@ -805,71 +807,113 @@ spark.stop()
             st.error(f"❌ Ingestion Error: {ex}")
 
 # -------------------------------------------------------------
-# TAB: TABLE BACKUP & DISASTER RECOVERY
+# TAB: TABLE & DATABASE BACKUP & DISASTER RECOVERY
 # -------------------------------------------------------------
 elif menu == "📦 Table Backup & Restore":
-    st.header("📦 Enterprise Table Backup & Disaster Recovery")
+    st.header("📦 Enterprise Table & Full Database Disaster Recovery")
     st.markdown(
-        "Take bit-for-bit verified backups of **both data files and Metastore metadata** "
+        "Take bit-for-bit verified backups of **single tables or entire databases** "
         "to a local folder, complete with **SHA-256 integrity checksums** to guarantee zero data corruption. "
-        "Restore backups back to original tables or clone them to new tables in 1-click."
+        "Restore single tables or entire databases in 1-click."
     )
 
     df_tables = get_hive_metastore_tables()
     all_table_names = [f"{r['Database']}.{r['Table Name']}" for _, r in df_tables.iterrows()] if not df_tables.empty else []
+    all_dbs = sorted(list(set([r['Database'] for _, r in df_tables.iterrows()]))) if not df_tables.empty else ["default"]
 
     b_tab_create, b_tab_list, b_tab_restore = st.tabs([
-        "💾 Create Table Backup",
+        "💾 Create Backup (Table or Full DB)",
         "📂 Local Backups Explorer",
-        "🔄 Restore Table from Backup"
+        "🔄 Restore (Table or Database)"
     ])
 
     # 1. CREATE BACKUP
     with b_tab_create:
-        st.subheader("💾 Create New Table Backup")
-        if all_table_names:
-            col_bk1, col_bk2 = st.columns(2)
-            with col_bk1:
-                selected_bk_table = st.selectbox("Select Table to Backup:", all_table_names, key="bk_sel_table")
-            with col_bk2:
-                custom_bk_id = st.text_input("Custom Backup Identifier (Optional):", value="", placeholder="e.g. rfid_snapshot_2026", key="bk_custom_id")
+        st.subheader("💾 Create Disaster Recovery Backup")
+        bk_scope = st.radio(
+            "Select Backup Scope:",
+            ["📁 Single Table Backup", "🗄️ Complete Database Backup (All Tables in DB)"],
+            horizontal=True
+        )
 
-            if st.button("🚀 Create Full Backup (Data + Metadata + Checksums)", type="primary"):
+        if "Single Table" in bk_scope:
+            if all_table_names:
+                col_bk1, col_bk2 = st.columns(2)
+                with col_bk1:
+                    selected_bk_table = st.selectbox("Select Table to Backup:", all_table_names, key="bk_sel_table")
+                with col_bk2:
+                    custom_bk_id = st.text_input("Custom Backup Identifier (Optional):", value="", placeholder="e.g. rfid_snapshot_2026", key="bk_custom_id")
+
+                if st.button("🚀 Create Full Table Backup", type="primary"):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    status_text.info(f"⏳ Initiating backup of `{selected_bk_table}`...")
+                    progress_bar.progress(30)
+                    
+                    parts = selected_bk_table.split(".")
+                    db_n = parts[0]
+                    tbl_n = parts[1]
+                    
+                    status_text.info(f"⏳ Exporting data chunks and calculating SHA-256 file checksums...")
+                    progress_bar.progress(60)
+                    
+                    out, code = execute_backup_job(mode="table", db_name=db_n, table_name=tbl_n, custom_id=custom_bk_id.strip() if custom_bk_id else None)
+                    progress_bar.progress(100)
+                    status_text.empty()
+                    
+                    if code == 0 and "__BACKUP_RESULT__|" in out:
+                        manifest_json = json.loads(out.split("__BACKUP_RESULT__|")[1].strip())
+                        st.success(f"🎉 Backup `{manifest_json['backup_id']}` completed with 100% integrity!")
+                        
+                        col_bkr1, col_bkr2, col_bkr3, col_bkr4 = st.columns(4)
+                        col_bkr1.metric("Rows Backed Up", f"{manifest_json['total_rows']:,}")
+                        col_bkr2.metric("Files Count", manifest_json['total_files'])
+                        col_bkr3.metric("Backup Size", f"{manifest_json['total_size_mb']} MB")
+                        col_bkr4.metric("Duration", f"{manifest_json['elapsed_seconds']}s")
+                        
+                        st.info(f"📁 **Saved Locally to:** `/backups/{manifest_json['backup_id']}/`")
+                    else:
+                        st.error(f"❌ Backup failed: {out}")
+            else:
+                st.info("No tables available in Hive Metastore to backup.")
+        else:
+            # Complete Database Backup
+            col_db1, col_db2 = st.columns(2)
+            with col_db1:
+                selected_bk_db = st.selectbox("Select Target Database to Backup:", all_dbs, key="bk_sel_db")
+            with col_db2:
+                custom_db_bk_id = st.text_input("Custom DB Backup Identifier (Optional):", value="", placeholder="e.g. default_db_full_backup", key="bk_custom_db_id")
+
+            db_tables = df_tables[df_tables["Database"] == selected_bk_db] if not df_tables.empty else pd.DataFrame()
+            st.info(f"🗄️ Database `{selected_bk_db}` contains **{len(db_tables)} table(s)**: `{', '.join(db_tables['Table Name'].tolist()) if not db_tables.empty else 'none'}`")
+
+            if st.button("🚀 Create Complete Database Backup", type="primary"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                status_text.info(f"⏳ Initiating backup of `{selected_bk_table}`...")
+                status_text.info(f"⏳ Initiating complete database backup for `{selected_bk_db}` ({len(db_tables)} tables)...")
                 progress_bar.progress(30)
-                
-                parts = selected_bk_table.split(".")
-                db_n = parts[0]
-                tbl_n = parts[1]
-                
-                status_text.info(f"⏳ Exporting data chunks and calculating SHA-256 file checksums...")
-                progress_bar.progress(60)
-                
-                out, code = execute_backup_job(db_n, tbl_n, custom_bk_id.strip() if custom_bk_id else None)
+
+                out, code = execute_backup_job(mode="database", db_name=selected_bk_db, custom_id=custom_db_bk_id.strip() if custom_db_bk_id else None)
                 progress_bar.progress(100)
                 status_text.empty()
-                
+
                 if code == 0 and "__BACKUP_RESULT__|" in out:
-                    manifest_json = json.loads(out.split("__BACKUP_RESULT__|")[1].strip())
-                    st.success(f"🎉 Backup `{manifest_json['backup_id']}` completed with 100% integrity!")
-                    
-                    col_bkr1, col_bkr2, col_bkr3, col_bkr4 = st.columns(4)
-                    col_bkr1.metric("Rows Backed Up", f"{manifest_json['total_rows']:,}")
-                    col_bkr2.metric("Files Count", manifest_json['total_files'])
-                    col_bkr3.metric("Backup Size", f"{manifest_json['total_size_mb']} MB")
-                    col_bkr4.metric("Duration", f"{manifest_json['elapsed_seconds']}s")
-                    
-                    st.info(f"📁 **Saved Locally to:** `/backups/{manifest_json['backup_id']}/`")
+                    db_manifest = json.loads(out.split("__BACKUP_RESULT__|")[1].strip())
+                    st.success(f"🎉 Complete Database Backup `{db_manifest['backup_id']}` created successfully with 100% integrity!")
+
+                    col_dbm1, col_dbm2, col_dbm3, col_dbm4 = st.columns(4)
+                    col_dbm1.metric("Tables Backed Up", db_manifest['total_tables'])
+                    col_dbm2.metric("Total Rows Across DB", f"{db_manifest['total_rows']:,}")
+                    col_dbm3.metric("Total DB Size", f"{db_manifest['total_size_mb']} MB")
+                    col_dbm4.metric("Total Duration", f"{db_manifest['elapsed_seconds']}s")
+
+                    st.info(f"📁 **Saved Locally to:** `/backups/{db_manifest['backup_id']}/`")
                 else:
-                    st.error(f"❌ Backup failed: {out}")
-        else:
-            st.info("No tables available in Hive Metastore to backup.")
+                    st.error(f"❌ Database backup failed: {out}")
 
     # 2. LOCAL BACKUPS EXPLORER
     with b_tab_list:
-        st.subheader("📂 Local Table Backups in `/backups/`")
+        st.subheader("📂 Local Backups in `/backups/`")
         if st.button("🔄 Refresh Backups List", key="ref_bks"):
             st.rerun()
 
@@ -877,10 +921,16 @@ elif menu == "📦 Table Backup & Restore":
         if local_bks:
             bk_summary_list = []
             for b in local_bks:
+                b_type = b.get("backup_type", "table").upper()
+                if b_type == "DATABASE":
+                    src = f"Database: {b.get('database')} ({b.get('total_tables', 0)} tables)"
+                else:
+                    src = f"Table: {b.get('database')}.{b.get('table')}"
+                
                 bk_summary_list.append({
+                    "Type": f"🗄️ {b_type}" if b_type == "DATABASE" else f"📁 {b_type}",
                     "Backup ID": b.get("backup_id"),
-                    "Source Table": f"{b.get('database')}.{b.get('table')}",
-                    "Format": b.get("format"),
+                    "Target / Source": src,
                     "Total Rows": f"{b.get('total_rows', 0):,}",
                     "Size": f"{b.get('total_size_mb', 0)} MB",
                     "Files": b.get("total_files", 0),
@@ -896,24 +946,44 @@ elif menu == "📦 Table Backup & Restore":
             
             if selected_insp_b:
                 target_manifest = next(b for b in local_bks if b["backup_id"] == selected_insp_b)
-                with st.expander("📋 View Backup Manifest & Data Files Checksums", expanded=True):
-                    col_m1, col_m2 = st.columns(2)
-                    with col_m1:
-                        st.json({
-                            "backup_id": target_manifest.get("backup_id"),
-                            "table": f"{target_manifest.get('database')}.{target_manifest.get('table')}",
-                            "format": target_manifest.get("format"),
-                            "total_rows": target_manifest.get("total_rows"),
-                            "total_size_mb": target_manifest.get("total_size_mb"),
-                            "created_at": target_manifest.get("created_at")
+                is_db_manifest = target_manifest.get("backup_type") == "database"
+
+                if is_db_manifest:
+                    st.markdown(f"**🗄️ Database Backup Details (`{target_manifest.get('database')}`):**")
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("Tables in Backup", target_manifest.get("total_tables"))
+                    col_m2.metric("Total Rows", f"{target_manifest.get('total_rows'):,}")
+                    col_m3.metric("Total Size", f"{target_manifest.get('total_size_mb')} MB")
+
+                    tbl_breakdown = []
+                    for t_name, t_meta in target_manifest.get("tables", {}).items():
+                        tbl_breakdown.append({
+                            "Table Name": t_name,
+                            "Format": t_meta.get("format", "Parquet"),
+                            "Rows": f"{t_meta.get('total_rows', 0):,}",
+                            "Files": t_meta.get("total_files", 0),
+                            "Size (MB)": t_meta.get("total_size_mb", 0)
                         })
-                    with col_m2:
-                        st.markdown("**🛡️ SHA-256 File Checksums (Zero-Corruption Verification):**")
-                        file_chk_df = pd.DataFrame([
-                            {"File": k, "Size (Bytes)": v["size"], "SHA-256 Checksum": v["sha256"]}
-                            for k, v in target_manifest.get("files", {}).items()
-                        ])
-                        st.dataframe(file_chk_df, use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(tbl_breakdown), use_container_width=True, hide_index=True)
+                else:
+                    with st.expander("📋 View Table Manifest & SHA-256 Checksums", expanded=True):
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
+                            st.json({
+                                "backup_id": target_manifest.get("backup_id"),
+                                "table": f"{target_manifest.get('database')}.{target_manifest.get('table')}",
+                                "format": target_manifest.get("format"),
+                                "total_rows": target_manifest.get("total_rows"),
+                                "total_size_mb": target_manifest.get("total_size_mb"),
+                                "created_at": target_manifest.get("created_at")
+                            })
+                        with col_m2:
+                            st.markdown("**🛡️ SHA-256 File Checksums:**")
+                            file_chk_df = pd.DataFrame([
+                                {"File": k, "Size (Bytes)": v["size"], "SHA-256 Checksum": v["sha256"]}
+                                for k, v in target_manifest.get("files", {}).items()
+                            ])
+                            st.dataframe(file_chk_df, use_container_width=True, hide_index=True)
 
                 # Tarball download
                 target_b_path = os.path.join(BACKUP_DIR, selected_insp_b)
@@ -929,27 +999,38 @@ elif menu == "📦 Table Backup & Restore":
                         mime="application/gzip"
                     )
         else:
-            st.info("No backups currently stored in `/backups/`. Create one using the 'Create Table Backup' tab!")
+            st.info("No backups currently stored in `/backups/`. Create one using the 'Create Backup' tab!")
 
-    # 3. RESTORE TABLE
+    # 3. RESTORE TABLE OR DATABASE
     with b_tab_restore:
-        st.subheader("🔄 Restore Table from Local Backup")
+        st.subheader("🔄 Restore Table or Database from Local Backup")
         st.markdown(
-            "Restore table data files and register in Hive Metastore. "
+            "Restore table or database data files and register in Hive Metastore. "
             "Integrity checksums are validated prior to restore to prevent any corruption."
         )
         local_bks = list_local_backups()
         if local_bks:
-            b_ids_res = [f"{b['backup_id']} ({b['database']}.{b['table']} - {b['total_rows']:,} rows)" for b in local_bks]
-            selected_res_str = st.selectbox("Select Backup to Restore:", b_ids_res, key="res_bk_sel")
+            b_options = []
+            for b in local_bks:
+                b_type = b.get("backup_type", "table").upper()
+                if b_type == "DATABASE":
+                    b_options.append(f"{b['backup_id']} [DATABASE: {b['database']} - {b.get('total_tables', 0)} tables]")
+                else:
+                    b_options.append(f"{b['backup_id']} [TABLE: {b['database']}.{b['table']} - {b['total_rows']:,} rows]")
+
+            selected_res_str = st.selectbox("Select Backup to Restore:", b_options, key="res_bk_sel")
             selected_res_id = selected_res_str.split(" ")[0]
             chosen_b = next(b for b in local_bks if b["backup_id"] == selected_res_id)
+            is_db_restore = chosen_b.get("backup_type") == "database"
 
             col_rt1, col_rt2 = st.columns(2)
             with col_rt1:
-                res_target_db = st.text_input("Restore Target Database", value="default", key="res_db")
-                res_target_tbl = st.text_input("Restore Target Table Name", value=chosen_b["table"], key="res_tbl")
-                res_target_tbl = sanitize_table_name(res_target_tbl)
+                res_target_db = st.text_input("Restore Target Database", value=chosen_b.get("database", "default"), key="res_db")
+                if not is_db_restore:
+                    res_target_tbl = st.text_input("Restore Target Table Name", value=chosen_b["table"], key="res_tbl")
+                    res_target_tbl = sanitize_table_name(res_target_tbl)
+                else:
+                    st.info(f"🗄️ Restoring all **{chosen_b.get('total_tables', 0)} tables** into database `{res_target_db}`.")
             with col_rt2:
                 res_storage_dest = st.selectbox(
                     "Target Storage Location",
@@ -957,7 +1038,10 @@ elif menu == "📦 Table Backup & Restore":
                     key="res_storage"
                 )
 
-            st.warning(f"⚠️ Restoring will populate `{res_target_db}.{res_target_tbl}` at `{res_storage_dest}{res_target_tbl}/`.")
+            if is_db_restore:
+                st.warning(f"⚠️ Restoring will populate all tables from `{selected_res_id}` into database `{res_target_db}` at `{res_storage_dest}`.")
+            else:
+                st.warning(f"⚠️ Restoring will populate `{res_target_db}.{res_target_tbl}` at `{res_storage_dest}{res_target_tbl}/`.")
 
             if st.button("🔄 Execute Full Restore & Register in Hue", type="primary", key="btn_run_restore"):
                 progress_bar = st.progress(0)
@@ -970,8 +1054,9 @@ elif menu == "📦 Table Backup & Restore":
 
                 out, code = execute_restore_job(
                     selected_res_id,
+                    mode="database" if is_db_restore else "table",
                     target_db=res_target_db,
-                    target_table=res_target_tbl,
+                    target_table=res_target_tbl if not is_db_restore else None,
                     storage_dest=res_storage_dest
                 )
                 progress_bar.progress(100)
@@ -979,15 +1064,19 @@ elif menu == "📦 Table Backup & Restore":
 
                 if code == 0 and "__RESTORE_RESULT__|" in out:
                     res_json = json.loads(out.split("__RESTORE_RESULT__|")[1].strip())
-                    st.success(f"🎉 Table `{res_json['restored_table']}` restored and verified successfully!")
-                    
-                    col_rr1, col_rr2, col_rr3 = st.columns(3)
-                    col_rr1.metric("Rows Restored", f"{res_json['rows_restored']:,}")
-                    col_rr2.metric("Storage Path", res_json['storage_location'])
-                    col_rr3.metric("Duration", f"{res_json['elapsed_seconds']}s")
+                    if is_db_restore:
+                        st.success(f"🎉 Database `{res_json['database']}` restored successfully ({res_json['total_rows_restored']:,} total rows across {len(res_json.get('tables_restored', {}))} tables)!")
+                        col_rr1, col_rr2 = st.columns(2)
+                        col_rr1.metric("Total Rows Restored", f"{res_json['total_rows_restored']:,}")
+                        col_rr2.metric("Total Duration", f"{res_json['elapsed_seconds']}s")
+                    else:
+                        st.success(f"🎉 Table `{res_json['restored_table']}` restored and verified successfully!")
+                        col_rr1, col_rr2, col_rr3 = st.columns(3)
+                        col_rr1.metric("Rows Restored", f"{res_json['rows_restored']:,}")
+                        col_rr2.metric("Storage Path", res_json['storage_location'])
+                        col_rr3.metric("Duration", f"{res_json['elapsed_seconds']}s")
 
                     st.subheader("🔍 Query in Hue")
-                    st.code(f"SELECT * FROM {res_json['restored_table']} LIMIT 10;", language="sql")
                     st.link_button("🎨 Open & Query in Hue Editor", "http://localhost:8888")
                 else:
                     st.error(f"❌ Restore Failed: {out}")
