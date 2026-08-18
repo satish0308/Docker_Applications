@@ -123,6 +123,66 @@ spark.stop()
     spark_cont.exec_run(f"rm -f {script_fname}")
     return res.output.decode('utf-8', errors='ignore'), res.exit_code
 
+def fetch_table_inspector_data(table_name, limit=50, custom_sql=None):
+    """Fetches structured columns, types, metrics, and sample records via Spark JSON serialization."""
+    spark_cont = client.containers.get("spark")
+    sql_to_run = custom_sql if custom_sql else f"SELECT * FROM {table_name} LIMIT {limit}"
+    
+    script = f"""
+import json
+import time
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \\
+    .appName("Inspector_{sanitize_table_name(table_name)}") \\
+    .config("spark.driver.memory", "2g") \\
+    .config("spark.executor.memory", "3g") \\
+    .enableHiveSupport() \\
+    .getOrCreate()
+
+t0 = time.time()
+try:
+    df_full = spark.table("{table_name}")
+    fields = []
+    for idx, f in enumerate(df_full.schema.fields):
+        fields.append({{
+            "Index": idx + 1,
+            "Column Name": f.name,
+            "Data Type": f.dataType.simpleString().upper(),
+            "Nullable": "YES" if f.nullable else "NO"
+        }})
+    
+    # Run query
+    df_sample = spark.sql(\"\"\"{sql_to_run}\"\"\")
+    sample_records = [row.asDict(recursive=True) for row in df_sample.collect()]
+    
+    # Fast row count or full count
+    total_count = df_full.count()
+    elapsed = time.time() - t0
+
+    result = {{
+        "status": "success",
+        "schema": fields,
+        "records": sample_records,
+        "total_rows": total_count,
+        "columns_count": len(fields),
+        "elapsed_sec": round(elapsed, 2)
+    }}
+    print("__JSON_RES_START__" + json.dumps(result, default=str) + "__JSON_RES_END__")
+except Exception as ex:
+    print("__JSON_RES_START__" + json.dumps({{"status": "error", "error": str(ex)}}) + "__JSON_RES_END__")
+spark.stop()
+"""
+    sf = f"/tmp/insp_{int(time.time())}.py"
+    copy_data_to_container(spark_cont, script.encode('utf-8'), "/tmp", os.path.basename(sf))
+    res = spark_cont.exec_run(f"/opt/spark/bin/spark-submit {sf}")
+    spark_cont.exec_run(f"rm -f {sf}")
+    out = res.output.decode('utf-8', errors='ignore')
+    if "__JSON_RES_START__" in out:
+        jstr = out.split("__JSON_RES_START__")[1].split("__JSON_RES_END__")[0]
+        return json.loads(jstr)
+    return {"status": "error", "error": out}
+
 def get_service_health(container):
     if container.status != 'running':
         return "❌ Down"
@@ -874,11 +934,11 @@ spark.stop()
             st.info("No recurring batch jobs registered yet. Create one on the left!")
 
 # -------------------------------------------------------------
-# TAB 4: METASTORE TABLE EXPLORER
+# TAB 4: METASTORE TABLE EXPLORER & RICH INSPECTOR
 # -------------------------------------------------------------
 elif menu == "🗄️ Metastore Table Explorer":
-    st.header("🗄️ Hive Metastore Catalog & Tables Explorer")
-    st.markdown("Browse all persistent tables registered in Hive Metastore and query sample records.")
+    st.header("🗄️ Metastore Catalog & Interactive Table Inspector")
+    st.markdown("Browse tables registered in Hive Metastore, inspect schemas, and query records with rich interactive data grids.")
 
     if st.button("🔄 Refresh Catalog"):
         st.rerun()
@@ -887,24 +947,105 @@ elif menu == "🗄️ Metastore Table Explorer":
     if not df_tables.empty:
         st.dataframe(df_tables, use_container_width=True, hide_index=True)
 
+        st.markdown("---")
         st.subheader("🔍 Interactive Table Inspector")
         table_options = [f"{r['Database']}.{r['Table Name']}" for _, r in df_tables.iterrows()]
         selected_tbl = st.selectbox("Select Table to Inspect:", table_options)
         
         if selected_tbl:
-            col_q1, col_q2 = st.columns([1, 4])
-            with col_q1:
-                if st.button(f"👁️ Preview `{selected_tbl}` Data"):
-                    with st.spinner(f"Reading sample rows from `{selected_tbl}`..."):
-                        try:
-                            spark_cont = client.containers.get("spark")
-                            py_cmd = f"spark-sql -e 'SELECT * FROM {selected_tbl} LIMIT 20;'"
-                            res = spark_cont.exec_run(py_cmd)
-                            st.code(res.output.decode('utf-8', errors='ignore'))
-                        except Exception as e:
-                            st.error(f"Error querying table: {e}")
-            with col_q2:
-                st.link_button("🎨 Open & Query in Hue Editor", "http://localhost:8888")
+            tbl_meta = df_tables[df_tables.apply(lambda r: f"{r['Database']}.{r['Table Name']}" == selected_tbl, axis=1)].iloc[0]
+            
+            # Overview Metrics
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Table Identifier", selected_tbl)
+            col_m2.metric("Storage Format", tbl_meta["Format"])
+            col_m3.metric("Storage Location", tbl_meta["Storage Location"])
+
+            insp_tab_grid, insp_tab_schema, insp_tab_sql = st.tabs([
+                "📊 Interactive Data Grid",
+                "📋 Visual Schema & Types",
+                "⚡ Custom SQL Query Runner"
+            ])
+
+            with insp_tab_grid:
+                col_row_opt1, col_row_opt2 = st.columns([1, 3])
+                with col_row_opt1:
+                    row_limit = st.selectbox("Rows Limit:", [10, 25, 50, 100, 250], index=1, key=f"limit_{selected_tbl}")
+                with col_row_opt2:
+                    st.write("")
+                    fetch_clicked = st.button("🔄 Load Sample Rows", type="primary", key=f"fetch_{selected_tbl}")
+
+                # Auto load or load on click
+                if fetch_clicked or f"data_{selected_tbl}_{row_limit}" in st.session_state:
+                    with st.spinner(f"Loading {row_limit} records from `{selected_tbl}` via Spark Engine..."):
+                        if fetch_clicked or f"data_{selected_tbl}_{row_limit}" not in st.session_state:
+                            insp_data = fetch_table_inspector_data(selected_tbl, limit=row_limit)
+                            st.session_state[f"data_{selected_tbl}_{row_limit}"] = insp_data
+                        else:
+                            insp_data = st.session_state[f"data_{selected_tbl}_{row_limit}"]
+
+                        if insp_data.get("status") == "success":
+                            records = insp_data.get("records", [])
+                            if records:
+                                sample_df = pd.DataFrame(records)
+                                st.dataframe(sample_df, use_container_width=True, hide_index=True)
+                                
+                                col_st1, col_st2 = st.columns([2, 1])
+                                with col_st1:
+                                    st.caption(f"✅ Loaded {len(sample_df)} sample rows (Total in table: {insp_data.get('total_rows', 0):,} rows) in {insp_data.get('elapsed_sec', 0)}s.")
+                                with col_st2:
+                                    csv_bytes = sample_df.to_csv(index=False).encode('utf-8')
+                                    st.download_button(
+                                        "📥 Export Preview to CSV",
+                                        csv_bytes,
+                                        file_name=f"{selected_tbl}_sample.csv",
+                                        mime="text/csv"
+                                    )
+                            else:
+                                st.info(f"Table `{selected_tbl}` is currently empty (0 rows).")
+                        else:
+                            st.error(f"Failed to load table records: {insp_data.get('error')}")
+
+            with insp_tab_schema:
+                st.subheader(f"📋 Schema & Column Specifications for `{selected_tbl}`")
+                if f"data_{selected_tbl}_{row_limit}" in st.session_state and st.session_state[f"data_{selected_tbl}_{row_limit}"].get("status") == "success":
+                    schema_records = st.session_state[f"data_{selected_tbl}_{row_limit}"].get("schema", [])
+                    if schema_records:
+                        df_schema = pd.DataFrame(schema_records)
+                        st.dataframe(df_schema, use_container_width=True, hide_index=True)
+                else:
+                    if st.button("🔍 Load Schema", key=f"load_schema_{selected_tbl}"):
+                        with st.spinner("Fetching schema..."):
+                            insp_data = fetch_table_inspector_data(selected_tbl, limit=1)
+                            st.session_state[f"data_{selected_tbl}_{row_limit}"] = insp_data
+                            if insp_data.get("status") == "success":
+                                df_schema = pd.DataFrame(insp_data.get("schema", []))
+                                st.dataframe(df_schema, use_container_width=True, hide_index=True)
+
+            with insp_tab_sql:
+                st.subheader(f"⚡ Execute Custom Query on `{selected_tbl}`")
+                custom_sql_input = st.text_area(
+                    "SQL Query:",
+                    value=f"SELECT * FROM {selected_tbl} LIMIT 25;",
+                    height=100
+                )
+                col_run1, col_run2 = st.columns([1, 3])
+                with col_run1:
+                    if st.button("▶️ Execute Query", type="primary", key=f"run_sql_{selected_tbl}"):
+                        with st.spinner("Executing query in SparkSQL engine..."):
+                            custom_res = fetch_table_inspector_data(selected_tbl, custom_sql=custom_sql_input)
+                            if custom_res.get("status") == "success":
+                                c_records = custom_res.get("records", [])
+                                if c_records:
+                                    c_df = pd.DataFrame(c_records)
+                                    st.dataframe(c_df, use_container_width=True, hide_index=True)
+                                    st.caption(f"✅ Returned {len(c_df)} rows in {custom_res.get('elapsed_sec', 0)}s.")
+                                else:
+                                    st.info("Query returned 0 rows.")
+                            else:
+                                st.error(f"SQL Execution Error: {custom_res.get('error')}")
+                with col_run2:
+                    st.link_button("🎨 Open in Hue Query Editor", "http://localhost:8888")
     else:
         st.info("No tables currently registered in Hive Metastore.")
 
