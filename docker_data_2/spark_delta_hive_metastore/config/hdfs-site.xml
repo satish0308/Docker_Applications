@@ -35,4 +35,13 @@
     <name>dfs.client.use.datanode.hostname</name>
     <value>true</value>
   </property>
+  <!-- Instant SafeMode Exit on Startup -->
+  <property>
+    <name>dfs.namenode.safemode.threshold-pct</name>
+    <value>0.0</value>
+  </property>
+  <property>
+    <name>dfs.namenode.safemode.extension</name>
+    <value>0</value>
+  </property>
 </configuration>
