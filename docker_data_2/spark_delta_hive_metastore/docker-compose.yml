@@ -143,6 +143,7 @@ services:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./backups:/backups
     depends_on:
       - postgres
       - namenode
@@ -288,6 +289,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./admin_panel:/app
+      - ./backups:/backups
     networks:
       - hadoop-network
 
