@@ -38,10 +38,18 @@ def copy_data_to_container(container, file_bytes, dest_dir, filename):
     container.put_archive(dest_dir, tar_stream.read())
 
 def sanitize_table_name(name):
-    name = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower())
+    name = re.sub(r'[^a-zA-Z0-9_]', '_', str(name).lower())
+    name = re.sub(r'_+', '_', name).strip('_')
     if name and name[0].isdigit():
         name = f"tbl_{name}"
-    return name.strip('_')
+    return name if name else "new_table"
+
+def sanitize_column_name(col_name):
+    clean = re.sub(r'[^a-zA-Z0-9_]', '_', str(col_name).strip()).lower()
+    clean = re.sub(r'_+', '_', clean).strip('_')
+    if clean and clean[0].isdigit():
+        clean = f"col_{clean}"
+    return clean if clean else "unnamed_col"
 
 def get_hive_metastore_tables():
     """Fetches real-time registered tables from PostgreSQL Hive Metastore."""
@@ -82,8 +90,7 @@ def get_hive_metastore_tables():
                 "Created At": str(r[4]) if r[4] else "N/A"
             })
         return pd.DataFrame(tables)
-    except Exception as ex:
-        # Fallback to empty if metastore unreachable
+    except Exception:
         return pd.DataFrame()
 
 def get_service_health(container):
@@ -192,78 +199,101 @@ st.sidebar.markdown("🔐 [Keycloak IAM](http://localhost:8080)")
 if menu == "📥 Data Ingestion & Table Creator":
     st.header("📥 Ingest Files & Auto-Create Tables in Hue / Hive")
     st.markdown(
-        "Upload a dataset file (or specify an HDFS / storage path) to automatically "
-        "detect its schema, convert to optimized **Parquet / Delta Lake**, store in **MinIO S3 / HDFS**, "
-        "and register as a queryable **External Table in Hue & Hive Metastore**."
+        "Upload multiple files (up to **10 GB** each) or point to host / HDFS datasets to automatically "
+        "detect schemas, **override column data types**, convert to optimized **Parquet / Delta Lake**, "
+        "and register as queryable **External Tables in Hue & Hive Metastore**."
     )
 
     source_type = st.radio(
-        "Select Data Source:",
-        ["📁 Upload Local File (CSV / Parquet / JSON / TSV)", "🐘 Select Existing File in HDFS / S3 Path"],
+        "Select Data Source Mode:",
+        [
+            "📁 Multi-File Browser Upload (CSV / Parquet / JSON / TSV up to 10GB)",
+            "🐘 Direct Path Ingestion (Host File / Windows Mount / HDFS Path / Wildcards)"
+        ],
         horizontal=True
     )
 
     st.markdown("---")
 
-    uploaded_file = None
-    input_file_path = None
+    uploaded_files = []
+    input_file_paths = []
     file_format = "csv"
     df_preview = None
     base_table_name = "new_table"
 
-    if "Upload Local File" in source_type:
-        uploaded_file = st.file_uploader(
-            "Drag and drop or browse a data file",
-            type=["csv", "parquet", "pq", "json", "tsv", "txt"]
+    if "Multi-File Browser Upload" in source_type:
+        uploaded_files = st.file_uploader(
+            "Drag and drop or browse one or multiple data files",
+            type=["csv", "parquet", "pq", "json", "tsv", "txt"],
+            accept_multiple_files=True,
+            help="Files up to 10 GB each are supported."
         )
-        if uploaded_file is not None:
-            filename = uploaded_file.name
-            base_table_name = sanitize_table_name(os.path.splitext(filename)[0])
+
+        if uploaded_files:
+            st.success(f"📁 {len(uploaded_files)} file(s) selected: {', '.join([f.name for f in uploaded_files[:5]])}{'...' if len(uploaded_files) > 5 else ''}")
             
-            # Detect format
-            ext = filename.split(".")[-1].lower()
+            # Select preview file if multiple
+            preview_file = uploaded_files[0]
+            if len(uploaded_files) > 1:
+                file_names = [f.name for f in uploaded_files]
+                selected_preview_name = st.selectbox("Select file to preview schema:", file_names)
+                preview_file = next(f for f in uploaded_files if f.name == selected_preview_name)
+            
+            base_table_name = sanitize_table_name(os.path.splitext(uploaded_files[0].name)[0])
+            ext = preview_file.name.split(".")[-1].lower()
+
             if ext in ["parquet", "pq"]:
                 file_format = "parquet"
                 try:
-                    df_preview = pd.read_parquet(uploaded_file)
+                    df_preview = pd.read_parquet(preview_file)
                 except Exception as e:
                     st.warning(f"Could not parse Parquet preview: {e}")
             elif ext == "json":
                 file_format = "json"
                 try:
-                    df_preview = pd.read_json(uploaded_file, lines=True, nrows=50)
+                    df_preview = pd.read_json(preview_file, lines=True, nrows=50)
                 except Exception:
-                    uploaded_file.seek(0)
+                    preview_file.seek(0)
                     try:
-                        df_preview = pd.read_json(uploaded_file, nrows=50)
+                        df_preview = pd.read_json(preview_file, nrows=50)
                     except Exception:
                         pass
             elif ext in ["tsv", "txt"]:
                 file_format = "csv"
                 try:
-                    df_preview = pd.read_csv(uploaded_file, sep="\t", nrows=50)
+                    df_preview = pd.read_csv(preview_file, sep="\t", nrows=50)
                 except Exception:
-                    uploaded_file.seek(0)
-                    df_preview = pd.read_csv(uploaded_file, nrows=50)
+                    preview_file.seek(0)
+                    df_preview = pd.read_csv(preview_file, nrows=50)
             else:
                 file_format = "csv"
                 try:
-                    df_preview = pd.read_csv(uploaded_file, nrows=50)
+                    df_preview = pd.read_csv(preview_file, nrows=50)
                 except Exception as e:
                     st.warning(f"Could not parse CSV preview: {e}")
             
-            uploaded_file.seek(0)
+            preview_file.seek(0)
 
     else:
-        hdfs_path_input = st.text_input(
-            "Enter HDFS or Storage Path:",
-            value="hdfs://namenode:9000/data/breweries.csv",
-            help="Example: hdfs://namenode:9000/data/breweries.csv or /data/benchmark/sales.csv"
+        st.info("💡 **Direct Path Mode**: Ingest large files (5GB, 20GB, 50GB+) directly from your Windows disk or HDFS without browser upload overhead.")
+        path_input = st.text_input(
+            "Enter Host Path (Windows/WSL) or HDFS Path / Wildcard:",
+            value="hdfs://namenode:9000/data/benchmark/sales_train_evaluation.csv",
+            help="Example: /mnt/c/Users/satish.hiremath/.../sales.csv or hdfs://namenode:9000/data/breweries.csv or /data/*.csv"
         )
-        if hdfs_path_input:
-            input_file_path = hdfs_path_input.strip()
-            base_filename = os.path.basename(input_file_path)
+        if path_input:
+            input_file_path = path_input.strip()
+            # Windows path translation if needed
+            if re.match(r'^[a-zA-Z]:\\', input_file_path):
+                drive_letter = input_file_path[0].lower()
+                rel_path = input_file_path[2:].replace('\\', '/')
+                input_file_path = f"/mnt/{drive_letter}{rel_path}"
+                st.caption(f"ℹ️ Translated Windows path to WSL: `{input_file_path}`")
+            
+            input_file_paths = [input_file_path]
+            base_filename = os.path.basename(input_file_path.replace('*', ''))
             base_table_name = sanitize_table_name(os.path.splitext(base_filename)[0])
+            
             if input_file_path.endswith(".parquet") or input_file_path.endswith(".pq"):
                 file_format = "parquet"
             elif input_file_path.endswith(".json"):
@@ -271,25 +301,74 @@ if menu == "📥 Data Ingestion & Table Creator":
             else:
                 file_format = "csv"
 
-    # Preview Section
+            # Try sample preview if local path
+            if os.path.exists(input_file_path) and os.path.isfile(input_file_path):
+                try:
+                    if file_format == "parquet":
+                        df_preview = pd.read_parquet(input_file_path)
+                    elif file_format == "json":
+                        df_preview = pd.read_json(input_file_path, lines=True, nrows=50)
+                    else:
+                        df_preview = pd.read_csv(input_file_path, nrows=50)
+                except Exception:
+                    pass
+
+    # ---------------------------------------------------------
+    # Preview & Schema Override Section
+    # ---------------------------------------------------------
+    type_overrides = {}
     if df_preview is not None:
-        st.subheader("🔍 Dynamic Schema & Data Preview (First 50 Rows)")
+        st.subheader("🔍 Schema Preview & Column Data Type Overrides")
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Columns Detected", len(df_preview.columns))
         col_m2.metric("Sample Rows Loaded", len(df_preview))
-        col_m3.metric("Detected Format", file_format.upper())
+        col_m3.metric("Detected File Format", file_format.upper())
         
-        st.dataframe(df_preview.head(50), use_container_width=True)
+        st.dataframe(df_preview.head(20), use_container_width=True)
 
-        with st.expander("📋 Inferred Column Types"):
-            dtypes_df = pd.DataFrame({
-                "Column Name": df_preview.columns,
-                "Inferred Python Type": [str(t) for t in df_preview.dtypes],
-                "Non-Null Count": [f"{df_preview[c].count()} / {len(df_preview)}" for c in df_preview.columns]
-            })
-            st.dataframe(dtypes_df, use_container_width=True, hide_index=True)
+        with st.expander("🛠️ Override Column Data Types (Optional)", expanded=True):
+            st.markdown("Change any column's target data type before inserting into Hive / S3:")
+            
+            available_types = [
+                "Auto (Inferred)",
+                "STRING",
+                "INT",
+                "BIGINT",
+                "DOUBLE",
+                "FLOAT",
+                "DECIMAL(18,2)",
+                "BOOLEAN",
+                "DATE",
+                "TIMESTAMP"
+            ]
 
-    # Ingestion Configuration Form
+            # Build interactive type override grid in 3-4 columns
+            cols_per_row = 3
+            col_list = list(df_preview.columns)
+            
+            for i in range(0, len(col_list), cols_per_row):
+                grid_cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
+                    if i + j < len(col_list):
+                        cname = col_list[i + j]
+                        s_name = sanitize_column_name(cname)
+                        inferred_type = str(df_preview[cname].dtype)
+                        with grid_cols[j]:
+                            selected_t = st.selectbox(
+                                f"`{cname}` ➔ `{s_name}` ({inferred_type}):",
+                                available_types,
+                                key=f"type_override_{cname}",
+                                index=0
+                            )
+                            if selected_t != "Auto (Inferred)":
+                                type_overrides[s_name] = selected_t
+
+            if type_overrides:
+                st.info(f"⚙️ Active Column Overrides: {type_overrides}")
+
+    # ---------------------------------------------------------
+    # Target Table Configuration
+    # ---------------------------------------------------------
     st.subheader("⚙️ Target Table & Storage Configuration")
     
     col_c1, col_c2 = st.columns(2)
@@ -310,48 +389,79 @@ if menu == "📥 Data Ingestion & Table Creator":
             index=0
         )
 
-    write_mode = st.radio("Write Mode", ["Overwrite (Replace existing table)", "Append (Add to existing data)"], horizontal=True)
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        write_mode = st.radio("Write Mode", ["Overwrite (Replace existing table)", "Append (Add to existing data)"], horizontal=True)
+    with col_w2:
+        if len(uploaded_files) > 1:
+            multi_file_strategy = st.radio("Multi-File Ingestion Strategy", ["Merge All into Single Table (Union)", "Create Separate Table per File"], horizontal=True)
+        else:
+            multi_file_strategy = "Single Table"
 
     st.markdown("---")
 
     # Ingestion Action Button
-    can_proceed = (uploaded_file is not None) or (input_file_path is not None)
+    can_proceed = (len(uploaded_files) > 0) or (len(input_file_paths) > 0)
     if not can_proceed:
-        st.info("👆 Please upload a file or specify a valid HDFS path above to start ingestion.")
+        st.info("👆 Please upload one or more files, or enter a valid file path above.")
     
     if st.button("🚀 Ingest & Register Table in Hue", type="primary", disabled=not can_proceed):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         try:
-            status_text.info("⏳ Step 1/4: Preparing staging files and cluster connection...")
+            status_text.info("⏳ Step 1/4: Staging files and verifying cluster connection...")
             progress_bar.progress(20)
-            
-            # Determine HDFS staging path
-            if uploaded_file is not None:
-                staging_hdfs_path = f"/data/uploads/{uploaded_file.name}"
-                namenode_cont = client.containers.get("namenode")
-                namenode_cont.exec_run("hdfs dfs -mkdir -p /data/uploads")
-                
-                # Copy file into namenode /tmp directory via Docker SDK
-                uploaded_file.seek(0)
-                file_bytes = uploaded_file.read()
-                copy_data_to_container(namenode_cont, file_bytes, "/tmp", uploaded_file.name)
-                
-                # Ingest to HDFS from container /tmp
-                put_res = namenode_cont.exec_run(f"hdfs dfs -put -f /tmp/{uploaded_file.name} {staging_hdfs_path}")
-                if put_res.exit_code != 0:
-                    err_msg = put_res.output.decode('utf-8', errors='ignore') if put_res.output else "Unknown HDFS error"
-                    raise Exception(f"Failed to stage file to HDFS: {err_msg}")
-                
-                source_path_for_spark = f"hdfs://namenode:9000{staging_hdfs_path}"
-            else:
-                source_path_for_spark = input_file_path
 
-            status_text.info("⏳ Step 2/4: Generating dynamic PySpark ingestion script...")
+            namenode_cont = client.containers.get("namenode")
+            namenode_cont.exec_run("hdfs dfs -mkdir -p /data/uploads")
+            
+            staged_source_paths = []
+
+            # 1. Process browser uploads
+            if uploaded_files:
+                for idx, ufile in enumerate(uploaded_files):
+                    status_text.info(f"⏳ Staging file {idx+1}/{len(uploaded_files)}: `{ufile.name}` ({ufile.size / (1024*1024):.1f} MB)...")
+                    staging_hdfs_path = f"/data/uploads/{ufile.name}"
+                    
+                    ufile.seek(0)
+                    file_bytes = ufile.read()
+                    copy_data_to_container(namenode_cont, file_bytes, "/tmp", ufile.name)
+                    
+                    put_res = namenode_cont.exec_run(f"hdfs dfs -put -f /tmp/{ufile.name} {staging_hdfs_path}")
+                    if put_res.exit_code != 0:
+                        err_msg = put_res.output.decode('utf-8', errors='ignore') if put_res.output else "HDFS put error"
+                        raise Exception(f"Failed to stage {ufile.name} to HDFS: {err_msg}")
+                    
+                    # Clean tmp file in namenode
+                    namenode_cont.exec_run(f"rm -f /tmp/{ufile.name}")
+                    staged_source_paths.append(f"hdfs://namenode:9000{staging_hdfs_path}")
+
+            # 2. Process direct host / HDFS paths
+            elif input_file_paths:
+                for ipath in input_file_paths:
+                    if ipath.startswith("hdfs://") or ipath.startswith("/data/"):
+                        staged_source_paths.append(ipath if ipath.startswith("hdfs://") else f"hdfs://namenode:9000{ipath}")
+                    elif os.path.exists(ipath):
+                        # Local file on host - stream into HDFS
+                        fname = os.path.basename(ipath)
+                        staging_hdfs_path = f"/data/uploads/{fname}"
+                        status_text.info(f"⏳ Streaming host file `{fname}` into HDFS...")
+                        
+                        with open(ipath, "rb") as f:
+                            file_bytes = f.read()
+                        copy_data_to_container(namenode_cont, file_bytes, "/tmp", fname)
+                        
+                        put_res = namenode_cont.exec_run(f"hdfs dfs -put -f /tmp/{fname} {staging_hdfs_path}")
+                        if put_res.exit_code != 0:
+                            raise Exception(f"Failed to put {fname} into HDFS")
+                        namenode_cont.exec_run(f"rm -f /tmp/{fname}")
+                        staged_source_paths.append(f"hdfs://namenode:9000{staging_hdfs_path}")
+
+            status_text.info("⏳ Step 2/4: Generating dynamic PySpark schema and type casting script...")
             progress_bar.progress(40)
 
-            # Determine storage path
+            # Determine storage destination
             is_s3 = "MinIO" in storage_dest
             if is_s3:
                 dest_path = f"s3a://warehouse/{target_table}/"
@@ -360,42 +470,44 @@ if menu == "📥 Data Ingestion & Table Creator":
 
             save_mode = "overwrite" if "Overwrite" in write_mode else "append"
             is_delta = "Delta Lake" in output_format
-            is_parquet = "Parquet" in output_format
 
             # Build PySpark Ingestion Script
             spark_script = f"""
 import time
 import re
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 spark = SparkSession.builder \\
     .appName("UI_Ingestion_{target_table}") \\
     .config("spark.driver.memory", "2g") \\
     .config("spark.executor.memory", "3g") \\
+    .config("spark.sql.shuffle.partitions", "16") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
 t0 = time.time()
-print("--> Reading source data from: {source_path_for_spark}")
+source_paths = {json.dumps(staged_source_paths)}
+print(f"--> Reading source files: {{source_paths}}")
 """
             if file_format == "csv":
                 spark_script += f"""
 df = spark.read \\
     .option("header", "true") \\
     .option("inferSchema", "true") \\
-    .csv("{source_path_for_spark}")
+    .csv(source_paths)
 """
             elif file_format == "parquet":
                 spark_script += f"""
-df = spark.read.parquet("{source_path_for_spark}")
+df = spark.read.parquet(*source_paths)
 """
             elif file_format == "json":
                 spark_script += f"""
-df = spark.read.json("{source_path_for_spark}")
+df = spark.read.json(source_paths)
 """
 
             spark_script += f"""
-# Sanitize all column names for universal Hive, Parquet, and Hue SQL compatibility
+# 1. Sanitize all column names for universal Hive, Parquet, and Hue SQL compatibility
 for c in df.columns:
     clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
     clean_c = re.sub(r'_+', '_', clean_c).strip('_')
@@ -405,7 +517,14 @@ for c in df.columns:
     if clean_c != c:
         df = df.withColumnRenamed(c, clean_c)
 
-print(f"--> Normalized Columns: {{df.columns}}")
+# 2. Apply Custom Column Data Type Overrides
+type_overrides = {json.dumps(type_overrides)}
+for col_name, target_type in type_overrides.items():
+    if col_name in df.columns:
+        print(f"--> Casting column '{{col_name}}' to '{{target_type}}'...")
+        df = df.withColumn(col_name, F.col(col_name).cast(target_type))
+
+print(f"--> Final Schema Columns: {{df.columns}}")
 """
 
             if is_delta:
@@ -444,7 +563,7 @@ spark.stop()
             if res.exit_code != 0:
                 raise Exception(f"Spark Ingestion failed (exit code {res.exit_code}):\n{output}")
 
-            # Parse results
+            # Parse execution results
             row_count_res = "N/A"
             time_taken_res = "N/A"
             for line in output.splitlines():
