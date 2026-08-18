@@ -248,39 +248,40 @@ if menu == "📥 Data Ingestion & Table Creator":
             data_bytes = preview_file.read()
             preview_file.seek(0)
 
+            # Write full file bytes to temporary file and flush/close immediately
             ext_suffix = os.path.splitext(preview_file.name)[1]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=ext_suffix) as tmp_f:
-                tmp_f.write(data_bytes)
-                tmp_path = tmp_f.name
+            tmp_f = tempfile.NamedTemporaryFile(delete=False, suffix=ext_suffix)
+            tmp_f.write(data_bytes)
+            tmp_f.flush()
+            tmp_f.close()
+            tmp_path = tmp_f.name
 
             try:
                 # 1. Try Parquet reading via pyarrow (supports all snappy, dictionary, multi-chunk Parquet files)
-                if data_bytes.startswith(b'PAR1') or preview_file.name.lower().endswith(('.parquet', '.pq')):
+                if preview_file.name.lower().endswith(('.parquet', '.pq')) or data_bytes.startswith(b'PAR1'):
+                    file_format = "parquet"
                     try:
                         tbl = pq.read_table(tmp_path)
                         df_preview = tbl.to_pandas().head(50)
-                        file_format = "parquet"
-                    except Exception:
+                    except Exception as pq_err:
                         try:
                             df_preview = pd.read_parquet(tmp_path).head(50)
-                            file_format = "parquet"
-                        except Exception:
-                            pass
+                        except Exception as pd_err:
+                            st.warning(f"Could not parse Parquet structure: {pq_err}")
 
                 # 2. Try JSON
-                if df_preview is None and (preview_file.name.lower().endswith('.json') or data_bytes.strip().startswith((b'{', b'['))):
+                elif preview_file.name.lower().endswith('.json') or data_bytes.strip().startswith((b'{', b'[')):
+                    file_format = "json"
                     try:
                         df_preview = pd.read_json(tmp_path, lines=True, nrows=50)
-                        file_format = "json"
                     except Exception:
                         try:
                             df_preview = pd.read_json(tmp_path, nrows=50)
-                            file_format = "json"
-                        except Exception:
-                            pass
+                        except Exception as json_err:
+                            st.warning(f"Could not parse JSON structure: {json_err}")
 
-                # 3. Fallback to CSV / TSV
-                if df_preview is None:
+                # 3. Fallback to CSV / TSV (only for text/csv files)
+                else:
                     file_format = "csv"
                     try:
                         if preview_file.name.lower().endswith(('.tsv', '.tab')):
@@ -290,11 +291,14 @@ if menu == "📥 Data Ingestion & Table Creator":
                     except Exception:
                         try:
                             df_preview = pd.read_csv(tmp_path, sep=None, engine='python', nrows=50)
-                        except Exception as e:
-                            st.warning(f"Could not parse preview: {e}")
+                        except Exception as csv_err:
+                            st.warning(f"Could not parse CSV structure: {csv_err}")
             finally:
                 if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
 
     else:
         st.info("💡 **Direct Path Mode**: Ingest large files (5GB, 20GB, 50GB+) directly from your Windows disk or HDFS without browser upload overhead.")
