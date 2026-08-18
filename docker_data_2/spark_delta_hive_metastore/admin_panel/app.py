@@ -10,7 +10,9 @@ import re
 import time
 import io
 import tarfile
+import tempfile
 import psycopg2
+import pyarrow.parquet as pq
 
 st.set_page_config(
     page_title="BDP Data Studio & Cluster Manager",
@@ -241,49 +243,58 @@ if menu == "📥 Data Ingestion & Table Creator":
             
             base_table_name = sanitize_table_name(os.path.splitext(uploaded_files[0].name)[0])
             
-            # Robust auto-detect preview parsing
+            # Robust auto-detect preview parsing using temporary disk buffer
             preview_file.seek(0)
             data_bytes = preview_file.read()
             preview_file.seek(0)
 
-            # 1. Check if Parquet (starts with PAR1 or has parquet extension)
-            if data_bytes.startswith(b'PAR1') or preview_file.name.lower().endswith(('.parquet', '.pq')):
-                try:
-                    df_preview = pd.read_parquet(io.BytesIO(data_bytes))
-                    file_format = "parquet"
-                except Exception:
-                    # Fallback to CSV / text if magic bytes or header differs
-                    try:
-                        df_preview = pd.read_csv(io.BytesIO(data_bytes), nrows=50)
-                        file_format = "csv"
-                    except Exception:
-                        pass
+            ext_suffix = os.path.splitext(preview_file.name)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext_suffix) as tmp_f:
+                tmp_f.write(data_bytes)
+                tmp_path = tmp_f.name
 
-            # 2. Check JSON
-            if df_preview is None and (preview_file.name.lower().endswith('.json') or data_bytes.strip().startswith((b'{', b'['))):
-                try:
-                    df_preview = pd.read_json(io.BytesIO(data_bytes), lines=True, nrows=50)
-                    file_format = "json"
-                except Exception:
+            try:
+                # 1. Try Parquet reading via pyarrow (supports all snappy, dictionary, multi-chunk Parquet files)
+                if data_bytes.startswith(b'PAR1') or preview_file.name.lower().endswith(('.parquet', '.pq')):
                     try:
-                        df_preview = pd.read_json(io.BytesIO(data_bytes), nrows=50)
+                        tbl = pq.read_table(tmp_path)
+                        df_preview = tbl.to_pandas().head(50)
+                        file_format = "parquet"
+                    except Exception:
+                        try:
+                            df_preview = pd.read_parquet(tmp_path).head(50)
+                            file_format = "parquet"
+                        except Exception:
+                            pass
+
+                # 2. Try JSON
+                if df_preview is None and (preview_file.name.lower().endswith('.json') or data_bytes.strip().startswith((b'{', b'['))):
+                    try:
+                        df_preview = pd.read_json(tmp_path, lines=True, nrows=50)
                         file_format = "json"
                     except Exception:
-                        pass
+                        try:
+                            df_preview = pd.read_json(tmp_path, nrows=50)
+                            file_format = "json"
+                        except Exception:
+                            pass
 
-            # 3. Fallback CSV / TSV
-            if df_preview is None:
-                file_format = "csv"
-                try:
-                    if preview_file.name.lower().endswith(('.tsv', '.tab')):
-                        df_preview = pd.read_csv(io.BytesIO(data_bytes), sep='\t', nrows=50)
-                    else:
-                        df_preview = pd.read_csv(io.BytesIO(data_bytes), nrows=50)
-                except Exception:
+                # 3. Fallback to CSV / TSV
+                if df_preview is None:
+                    file_format = "csv"
                     try:
-                        df_preview = pd.read_csv(io.BytesIO(data_bytes), sep=None, engine='python', nrows=50)
-                    except Exception as e:
-                        st.warning(f"Could not automatically parse preview: {e}")
+                        if preview_file.name.lower().endswith(('.tsv', '.tab')):
+                            df_preview = pd.read_csv(tmp_path, sep='\t', nrows=50)
+                        else:
+                            df_preview = pd.read_csv(tmp_path, nrows=50)
+                    except Exception:
+                        try:
+                            df_preview = pd.read_csv(tmp_path, sep=None, engine='python', nrows=50)
+                        except Exception as e:
+                            st.warning(f"Could not parse preview: {e}")
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
 
     else:
         st.info("💡 **Direct Path Mode**: Ingest large files (5GB, 20GB, 50GB+) directly from your Windows disk or HDFS without browser upload overhead.")
