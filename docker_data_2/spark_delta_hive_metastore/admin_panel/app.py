@@ -266,8 +266,14 @@ if menu == "📥 Data Ingestion & Table Creator":
                     except Exception as pq_err:
                         try:
                             df_preview = pd.read_parquet(tmp_path).head(50)
-                        except Exception as pd_err:
-                            st.warning(f"Could not parse Parquet structure: {pq_err}")
+                        except Exception:
+                            st.error(
+                                "❌ **Incomplete / Corrupted Parquet File Detected**\n\n"
+                                f"The uploaded file `{preview_file.name}` is missing its trailing metadata footer (`PAR1` signature at tail).\n\n"
+                                "💡 **Why this happens**: When a file download or AWS Glue/Spark export is interrupted before finishing, "
+                                "the file has the opening header but is cut off before the schema footer is written to disk.\n\n"
+                                "👉 **Action Required**: Please re-download the complete file from your source AWS S3 bucket / system."
+                            )
 
                 # 2. Try JSON
                 elif preview_file.name.lower().endswith('.json') or data_bytes.strip().startswith((b'{', b'[')):
