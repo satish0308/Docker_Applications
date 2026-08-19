@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import psycopg2
 import pyarrow.parquet as pq
+import spark_tuning_manager
 
 st.set_page_config(
     page_title="BDP Data Studio & Performance Engine",
@@ -334,6 +335,7 @@ menu = st.sidebar.radio(
     "Navigation Menu",
     [
         "📥 Data Ingestion & Partitioning",
+        "⚡ Spark Tuning & Cluster Scaling",
         "📦 Table Backup & Restore",
         "⏳ Delta Time-Travel & Maintenance",
         "⏰ Scheduled Ingestion Jobs",
@@ -598,6 +600,60 @@ if menu == "📥 Data Ingestion & Partitioning":
         else:
             multi_file_strategy = "Single Table"
 
+    # ---------------------------------------------------------
+    # Spark Execution Sizing & Resource Tuning
+    # ---------------------------------------------------------
+    total_est_bytes = sum(f.size for f in uploaded_files) if uploaded_files else 100 * 1024 * 1024
+    rec_prof_name, rec_mb = spark_tuning_manager.recommend_profile_for_filesize(total_est_bytes)
+    
+    with st.expander(f"⚡ Spark Execution Sizing & Compute Tuning (Recommended: {rec_prof_name})", expanded=True):
+        col_sz1, col_sz2 = st.columns([1.5, 2])
+        with col_sz1:
+            profile_keys = list(spark_tuning_manager.PROFILES.keys()) + ["🛠️ Custom Engine Tuning"]
+            default_idx = profile_keys.index(rec_prof_name) if rec_prof_name in profile_keys else 1
+            selected_ingest_profile = st.selectbox(
+                "Select Execution Profile:",
+                profile_keys,
+                index=default_idx,
+                key="ingest_sizing_profile"
+            )
+        with col_sz2:
+            if selected_ingest_profile != "🛠️ Custom Engine Tuning":
+                p_meta = spark_tuning_manager.PROFILES[selected_ingest_profile]
+                st.caption(f"💡 **Profile Summary**: {p_meta['description']}")
+                st.markdown(f"**Driver**: `{p_meta['driver_memory']}` | **Executor**: `{p_meta['executor_memory']}` | **Cores**: `{p_meta['executor_cores']}` | **Shuffle Partitions**: `{p_meta['shuffle_partitions']}` | **AQE**: `{'Enabled' if p_meta['aqe_enabled'] else 'Disabled'}`")
+            else:
+                st.caption("💡 Customize exact JVM memory and CPU cores for this specific ingestion job.")
+
+        if selected_ingest_profile == "🛠️ Custom Engine Tuning":
+            col_cust1, col_cust2, col_cust3, col_cust4 = st.columns(4)
+            with col_cust1:
+                c_driver_mem = st.selectbox("Driver Memory", ["1g", "2g", "4g", "8g", "16g"], index=1, key="c_drv_mem")
+            with col_cust2:
+                c_exec_mem = st.selectbox("Executor Memory", ["2g", "4g", "8g", "16g", "32g"], index=1, key="c_exe_mem")
+            with col_cust3:
+                c_exec_cores = st.number_input("Executor Cores", min_value=1, max_value=16, value=2, key="c_exe_cores")
+            with col_cust4:
+                c_shuffle_parts = st.number_input("Shuffle Partitions", min_value=1, max_value=800, value=64, key="c_shuf_parts")
+            
+            c_aqe = st.checkbox("Enable Adaptive Query Execution (AQE)", value=True, key="c_aqe_chk")
+            chosen_ingest_params = {
+                "driver_memory": c_driver_mem,
+                "executor_memory": c_exec_mem,
+                "executor_cores": c_exec_cores,
+                "max_cores": c_exec_cores * 2,
+                "shuffle_partitions": c_shuffle_parts,
+                "aqe_enabled": c_aqe,
+                "aqe_coalesce": c_aqe,
+                "memory_fraction": 0.7,
+                "storage_fraction": 0.5,
+                "offheap_enabled": False,
+                "offheap_size": "0",
+                "kryo_serializer": True
+            }
+        else:
+            chosen_ingest_params = spark_tuning_manager.PROFILES[selected_ingest_profile]
+
     st.markdown("---")
 
     # Ingestion Action Button
@@ -678,9 +734,9 @@ from pyspark.sql import functions as F
 
 spark = SparkSession.builder \\
     .appName("UI_Ingestion_{target_table}") \\
-    .config("spark.driver.memory", "2g") \\
-    .config("spark.executor.memory", "3g") \\
-    .config("spark.sql.shuffle.partitions", "16") \\
+    .config("spark.driver.memory", "{chosen_ingest_params.get('driver_memory', '2g')}") \\
+    .config("spark.executor.memory", "{chosen_ingest_params.get('executor_memory', '3g')}") \\
+    .config("spark.sql.shuffle.partitions", "{chosen_ingest_params.get('shuffle_partitions', 64)}") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
@@ -759,8 +815,9 @@ spark.stop()
             script_filename = f"ingest_{target_table}.py"
             copy_data_to_container(spark_cont, spark_script.encode('utf-8'), "/tmp", script_filename)
 
+            tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_ingest_params)
             res = spark_cont.exec_run(
-                f"/opt/spark/bin/spark-submit --driver-memory 2g --executor-memory 3g /tmp/{script_filename}"
+                f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}"
             )
             output = res.output.decode('utf-8', errors='ignore')
 
@@ -805,6 +862,201 @@ spark.stop()
             progress_bar.progress(100)
             status_text.empty()
             st.error(f"❌ Ingestion Error: {ex}")
+
+# -------------------------------------------------------------
+# TAB: SPARK TUNING & CLUSTER SCALING
+# -------------------------------------------------------------
+elif menu == "⚡ Spark Tuning & Cluster Scaling":
+    st.header("⚡ Dynamic Spark Tuning & Horizontal Cluster Scaling")
+    st.markdown(
+        "Empower administrators to **scale worker nodes up/down on-demand**, dynamically tune "
+        "**JVM memory, CPU cores, shuffle partitions, and Adaptive Query Execution (AQE)**, "
+        "and select optimal workload sizing profiles to eliminate crashes and OOM errors on large datasets."
+    )
+
+    t_tab_scaling, t_tab_profiles, t_tab_active_apps = st.tabs([
+        "🖥️ Cluster Compute & Worker Scaling",
+        "⚙️ Workload Sizing & Parameter Tuning",
+        "📈 Active Applications & Master Telemetry"
+    ])
+
+    metrics = spark_tuning_manager.get_spark_master_metrics()
+
+    # 1. HORIZONTAL WORKER SCALING & COMPUTE OVERVIEW
+    with t_tab_scaling:
+        st.subheader("🖥️ Real-Time Cluster Compute Capacity")
+        
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        col_m1.metric("Active Worker Nodes", f"{metrics['alive_workers']} / {metrics['total_workers']}")
+        col_m2.metric("Total CPU Cores", f"{metrics['total_cores']} Cores", f"{metrics['cores_free']} Free")
+        col_m3.metric("Total Cluster RAM", f"{metrics['total_memory_mb'] / 1024:.1f} GB", f"{metrics['memory_free_mb'] / 1024:.1f} GB Free")
+        col_m4.metric("Active Spark Apps", metrics['active_apps_count'])
+
+        st.markdown("---")
+        st.subheader("🚀 Horizontal Worker Node Scaling (Elastic Scale Up / Down)")
+        st.markdown(
+            "Dynamically scale your Spark worker compute fleet up to handle massive batch ingestions, "
+            "or scale down to conserve CPU and RAM resources when idle."
+        )
+
+        col_sc1, col_sc2 = st.columns([2, 1])
+        with col_sc1:
+            target_scale = st.slider(
+                "Target Worker Count:",
+                min_value=1,
+                max_value=8,
+                value=max(1, metrics['alive_workers']),
+                help="Each worker node provides 4 CPU Cores and 4GB Memory."
+            )
+            est_cores = target_scale * 4
+            est_ram = target_scale * 4
+            st.info(f"📊 Projected Cluster Capacity: **{est_cores} Total CPU Cores** & **{est_ram} GB Total Cluster RAM**")
+        with col_sc2:
+            st.write("")
+            st.write("")
+            if st.button("🚀 Apply Worker Scale", type="primary", key="btn_apply_scale"):
+                with st.spinner(f"Scaling cluster to {target_scale} worker node(s)..."):
+                    out, code = spark_tuning_manager.scale_cluster_workers(target_scale)
+                    if code == 0:
+                        st.success(f"🎉 Successfully scaled cluster to {target_scale} worker(s)!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to scale workers: {out}")
+
+        st.markdown("---")
+        st.subheader("📋 Registered Worker Nodes")
+        if metrics["worker_list"]:
+            df_workers = pd.DataFrame(metrics["worker_list"])
+            st.dataframe(df_workers, use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ No worker nodes currently registered with Spark Master. Scale up to at least 1 worker node.")
+
+    # 2. WORKLOAD SIZING PRESETS & FINE-GRAINED TUNING
+    with t_tab_profiles:
+        st.subheader("⚙️ Workload Sizing Presets & Engine Tuning")
+        st.markdown(
+            "Select a pre-engineered profile or fine-tune exact JVM memory fractions, shuffle partition counts, "
+            "and off-heap memory allocations."
+        )
+
+        current_config = spark_tuning_manager.load_tuning_config()
+        active_prof_name = current_config.get("active_profile", "🟡 Medium (Standard ETL / Daily Batches)")
+        active_params = current_config.get("params", spark_tuning_manager.PROFILES["🟡 Medium (Standard ETL / Daily Batches)"])
+
+        selected_prof = st.selectbox(
+            "Select Active Workload Profile:",
+            list(spark_tuning_manager.PROFILES.keys()) + ["🛠️ Custom Engine Override"],
+            index=list(spark_tuning_manager.PROFILES.keys()).index(active_prof_name) if active_prof_name in spark_tuning_manager.PROFILES else 1,
+            key="tuning_prof_sel"
+        )
+
+        if selected_prof in spark_tuning_manager.PROFILES:
+            prof_data = spark_tuning_manager.PROFILES[selected_prof]
+            st.info(f"📋 **Description**: {prof_data['description']}")
+            drv_mem_val = prof_data["driver_memory"]
+            exe_mem_val = prof_data["executor_memory"]
+            exe_cores_val = prof_data["executor_cores"]
+            max_cores_val = prof_data["max_cores"]
+            shuf_parts_val = prof_data["shuffle_partitions"]
+            aqe_val = prof_data["aqe_enabled"]
+            aqe_coal_val = prof_data["aqe_coalesce"]
+            mem_frac_val = prof_data["memory_fraction"]
+            offheap_val = prof_data["offheap_enabled"]
+            offheap_sz_val = prof_data["offheap_size"]
+            kryo_val = prof_data["kryo_serializer"]
+        else:
+            st.info("🛠️ **Custom Mode**: Configure exact parameters according to your specific hardware and dataset constraints.")
+            drv_mem_val = active_params.get("driver_memory", "2g")
+            exe_mem_val = active_params.get("executor_memory", "4g")
+            exe_cores_val = active_params.get("executor_cores", 2)
+            max_cores_val = active_params.get("max_cores", 4)
+            shuf_parts_val = active_params.get("shuffle_partitions", 64)
+            aqe_val = active_params.get("aqe_enabled", True)
+            aqe_coal_val = active_params.get("aqe_coalesce", True)
+            mem_frac_val = active_params.get("memory_fraction", 0.7)
+            offheap_val = active_params.get("offheap_enabled", False)
+            offheap_sz_val = active_params.get("offheap_size", "0")
+            kryo_val = active_params.get("kryo_serializer", True)
+
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.markdown("#### 🧠 JVM Memory Allocation")
+            in_drv_mem = st.selectbox(
+                "Driver Memory (`spark.driver.memory`)",
+                ["1g", "2g", "4g", "8g", "16g", "32g"],
+                index=["1g", "2g", "4g", "8g", "16g", "32g"].index(drv_mem_val) if drv_mem_val in ["1g", "2g", "4g", "8g", "16g", "32g"] else 1
+            )
+            in_exe_mem = st.selectbox(
+                "Executor Memory (`spark.executor.memory`)",
+                ["2g", "4g", "8g", "16g", "32g", "64g"],
+                index=["2g", "4g", "8g", "16g", "32g", "64g"].index(exe_mem_val) if exe_mem_val in ["2g", "4g", "8g", "16g", "32g", "64g"] else 1
+            )
+            in_mem_frac = st.slider("Execution & Storage Memory Fraction (`spark.memory.fraction`)", 0.5, 0.95, float(mem_frac_val), 0.05)
+
+        with col_t2:
+            st.markdown("#### ⚡ CPU Cores & Parallelism")
+            in_exe_cores = st.number_input("Cores Per Executor (`spark.executor.cores`)", 1, 16, int(exe_cores_val))
+            in_max_cores = st.number_input("Max Cores for Cluster Job (`spark.cores.max`)", 1, 64, int(max_cores_val))
+            in_shuf_parts = st.number_input("Shuffle Partitions (`spark.sql.shuffle.partitions`)", 2, 1000, int(shuf_parts_val), step=8)
+
+        st.markdown("#### 🚀 Advanced Query Optimizations")
+        col_o1, col_o2, col_o3 = st.columns(3)
+        with col_o1:
+            in_aqe = st.checkbox("Enable Adaptive Query Execution (AQE)", value=bool(aqe_val))
+            in_aqe_coal = st.checkbox("AQE Dynamic Partition Coalescing", value=bool(aqe_coal_val), disabled=not in_aqe)
+        with col_o2:
+            in_kryo = st.checkbox("Enable Kryo Fast Serialization (`KryoSerializer`)", value=bool(kryo_val))
+        with col_o3:
+            in_offheap = st.checkbox("Enable Off-Heap Memory (`spark.memory.offHeap.enabled`)", value=bool(offheap_val))
+            in_offheap_sz = st.selectbox("Off-Heap Size", ["512m", "1g", "2g", "4g"], index=["512m", "1g", "2g", "4g"].index(offheap_sz_val) if offheap_sz_val in ["512m", "1g", "2g", "4g"] else 1, disabled=not in_offheap)
+
+        compiled_params = {
+            "driver_memory": in_drv_mem,
+            "executor_memory": in_exe_mem,
+            "executor_cores": in_exe_cores,
+            "max_cores": in_max_cores,
+            "shuffle_partitions": in_shuf_parts,
+            "aqe_enabled": in_aqe,
+            "aqe_coalesce": in_aqe_coal,
+            "memory_fraction": in_mem_frac,
+            "storage_fraction": 0.5,
+            "offheap_enabled": in_offheap,
+            "offheap_size": in_offheap_sz if in_offheap else "0",
+            "kryo_serializer": in_kryo
+        }
+
+        generated_flags = spark_tuning_manager.build_spark_submit_conf_args(compiled_params)
+        st.markdown("#### 📜 Generated Spark Submit CLI Arguments")
+        st.code(f"/opt/spark/bin/spark-submit {generated_flags} <job_script.py>", language="bash")
+
+        if st.button("💾 Apply & Save Tuning Profile as Cluster Default", type="primary", key="btn_save_tuning"):
+            spark_tuning_manager.save_tuning_config({
+                "active_profile": selected_prof,
+                "params": compiled_params
+            })
+            st.success(f"🎉 Tuning configuration updated and saved! All future ingestion and batch jobs will use these parameters.")
+
+    # 3. ACTIVE APPLICATIONS MONITOR
+    with t_tab_active_apps:
+        st.subheader("📈 Live Running & Queued Applications on Spark Master")
+        active_apps = metrics.get("active_apps", [])
+        if active_apps:
+            apps_data = []
+            for a in active_apps:
+                apps_data.append({
+                    "App ID": a.get("id"),
+                    "Name": a.get("name"),
+                    "User": a.get("user"),
+                    "Cores": a.get("cores"),
+                    "Memory / Slave": f"{a.get('memoryperslave')} MB",
+                    "State": a.get("state"),
+                    "Duration": f"{a.get('duration', 0) / 1000:.1f}s",
+                    "Submitted At": a.get("submitdate")
+                })
+            st.dataframe(pd.DataFrame(apps_data), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ No applications are currently running on Spark Master. All cluster resources are available.")
 
 # -------------------------------------------------------------
 # TAB: TABLE & DATABASE BACKUP & DISASTER RECOVERY
