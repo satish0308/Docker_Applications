@@ -27,28 +27,39 @@ This project provides a comprehensive, Docker-based Big Data environment, mergin
     ```
 
 2.  **Accessing Services**:
-    - **Hue**: `http://localhost:8888`
+    - **⚡ Admin Web Studio**: `http://localhost:8501` (Data Ingestion, Backup/Restore, Spark Tuning & Scaling)
+    - **Hue Query Editor**: `http://localhost:8888`
     - **JupyterLab**: `http://localhost:8889`
-    - **MinIO Console**: `http://localhost:9001` (login: `minioadmin` / `minioadmin123`)
-    - **Spark UI**: `http://localhost:8080`
-    - **pgAdmin**: `http://localhost:8081`
+    - **MinIO S3 Console**: `http://localhost:9001` (login: `minioadmin` / `minioadmin123`)
+    - **Keycloak IAM (SSO)**: `http://localhost:8080` (login: `admin` / `admin`)
+    - **Spark Master UI**: `http://localhost:8089` (or `http://localhost:8080`)
+    - **pgAdmin 4**: `http://localhost:8081`
     - **HDFS Namenode**: `http://localhost:9870`
     - **YARN ResourceManager**: `http://localhost:8088`
+
+---
+
+## 📚 Platform Guides & Documentation
+
+All comprehensive enterprise guides are available under the **[`docs/`](docs/)** directory:
+
+- ⚡ **[Spark Dynamic Tuning & Horizontal Cluster Scaling Guide](docs/spark_tuning_scaling_guide.md)**: Dynamic workload sizing profiles (Light, Medium, Heavy, Extreme), OOM prevention, and horizontal worker node scaling (`docker compose up -d --scale spark-worker=N`).
+- 📦 **[Table & Full Database Disaster Recovery Guide](docs/table_backup_restore_guide.md)**: Bit-for-bit verified table and database backups with cryptographic SHA-256 checksums and 1-click restore.
+- 🚀 **[Production Data Pipeline & Delta Performance Guide](docs/data_pipeline_delta_guide.md)**: Dynamic Partitioning, Delta Lake Time-Travel, `OPTIMIZE` / `VACUUM` compaction, and Scheduled Directory Watchers.
 
 ---
 
 ## ⚙️ Connectivity
 
 ### Connecting Jupyter to Spark
-In your JupyterLab notebook, use the following `SparkSession` builder to connect to the Spark master:
+In your JupyterLab notebook, the `spark` and `sc` sessions are **automatically initialized upon opening any notebook**! You can also connect manually with:
 
 ```python
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder \
     .appName("BDP Jupyter Session") \
-    .master("spark://spark:7077") \
-    .config("spark.executor.memory", "2g") \
+    .enableHiveSupport() \
     .getOrCreate()
 ```
 
