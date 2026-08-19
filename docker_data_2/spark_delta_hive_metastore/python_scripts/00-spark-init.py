@@ -13,8 +13,10 @@ try:
 
     spark = SparkSession.builder \
         .appName("JupyterLab_Interactive") \
+        .master("spark://spark:7077") \
+        .config("spark.driver.host", "jupyter-notebook") \
         .config("spark.driver.memory", "2g") \
-        .config("spark.executor.memory", "2g") \
+        .config("spark.executor.memory", "4g") \
         .config("spark.sql.shuffle.partitions", "16") \
         .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
         .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
