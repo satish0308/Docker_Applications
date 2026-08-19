@@ -264,18 +264,80 @@ def get_spark_master_metrics():
     }
 
 def scale_cluster_workers(target_count):
-    """Scales Spark Worker containers up or down via Docker socket."""
-    client = docker.from_env()
-    existing_workers = [
-        c for c in client.containers.list(all=True)
-        if "spark-worker" in c.name or "spark_worker" in c.name
-    ]
-    current_count = len([c for c in existing_workers if c.status == "running"])
+    """Scales Spark Worker containers up or down dynamically via Python Docker SDK."""
+    try:
+        client = docker.from_env()
+        all_workers = [
+            c for c in client.containers.list(all=True)
+            if ("spark-worker" in c.name or "spark_worker" in c.name)
+        ]
+        
+        running_workers = [c for c in all_workers if c.status == "running"]
+        current_count = len(running_workers)
 
-    if target_count == current_count:
-        return f"Cluster is already running at {target_count} worker(s).", 0
+        if target_count == current_count:
+            return f"Cluster is already running at {target_count} worker(s).", 0
 
-    import subprocess
-    cmd = f"docker compose up -d --scale spark-worker={target_count}"
-    proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return proc.stdout + proc.stderr, proc.returncode
+        template_worker = all_workers[0] if all_workers else None
+        if not template_worker:
+            return "No base spark-worker container found.", 1
+
+        image_name = template_worker.image.tags[0] if template_worker.image.tags else template_worker.image.id
+        network_name = list(template_worker.attrs['NetworkSettings']['Networks'].keys())[0] if template_worker.attrs['NetworkSettings']['Networks'] else "hadoop-network"
+        binds = template_worker.attrs['HostConfig']['Binds'] or []
+        env = template_worker.attrs['Config']['Env'] or [
+            "SPARK_MODE=worker",
+            "SPARK_MASTER_URL=spark://spark:7077",
+            "SPARK_WORKER_CORES=4",
+            "SPARK_WORKER_MEMORY=4g"
+        ]
+        entrypoint = template_worker.attrs['Config']['Entrypoint'] or ["/home/sparkuser/start-spark2.sh"]
+
+        vol_map = {}
+        for b in binds:
+            parts = b.split(":")
+            if len(parts) >= 2:
+                host_p = parts[0]
+                cont_p = parts[1]
+                mode = parts[2] if len(parts) > 2 else "rw"
+                vol_map[host_p] = {"bind": cont_p, "mode": mode}
+
+        if target_count > current_count:
+            added = 0
+            for i in range(1, target_count + 15):
+                active_now = len([c for c in client.containers.list(all=True) if ("spark-worker" in c.name or "spark_worker" in c.name) and c.status == "running"])
+                if active_now >= target_count:
+                    break
+                w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
+                try:
+                    c = client.containers.get(w_name)
+                    if c.status != "running":
+                        c.start()
+                        added += 1
+                except docker.errors.NotFound:
+                    client.containers.run(
+                        image=image_name,
+                        name=w_name,
+                        detach=True,
+                        environment=env,
+                        network=network_name,
+                        volumes=vol_map,
+                        entrypoint=entrypoint
+                    )
+                    added += 1
+            return f"Successfully scaled UP to {target_count} worker nodes (added/started {added} worker(s)).", 0
+
+        elif target_count < current_count:
+            to_stop = current_count - target_count
+            stopped = 0
+            running_sorted = sorted(running_workers, key=lambda x: x.name, reverse=True)
+            for c in running_sorted:
+                if stopped >= to_stop:
+                    break
+                c.stop(timeout=5)
+                c.remove(force=True)
+                stopped += 1
+            return f"Successfully scaled DOWN to {target_count} worker nodes (stopped/removed {stopped} worker(s)).", 0
+
+    except Exception as e:
+        return f"Error scaling workers: {str(e)}", 1
