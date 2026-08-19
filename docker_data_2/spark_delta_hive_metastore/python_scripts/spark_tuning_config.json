@@ -11,7 +11,7 @@
     "memory_fraction": 0.8,
     "storage_fraction": 0.5,
     "offheap_enabled": true,
-    "offheap_size": "2g",
+    "offheap_size": "1g",
     "kryo_serializer": true
   }
 }
