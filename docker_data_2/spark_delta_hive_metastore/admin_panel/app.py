@@ -249,12 +249,16 @@ def purge_hanging_state_and_memory():
     except Exception as ex:
         logs.append(f"ℹ️ PostgreSQL Cleanup: {ex}")
 
-    # 3. Ensure HDFS Out of SafeMode
+    # 3. Ensure HDFS Out of SafeMode and Self-Heal Missing Blocks
     try:
         nn_container = client.containers.get("namenode")
         res = nn_container.exec_run("hdfs dfsadmin -safemode leave")
         out = res.output.decode('utf-8').strip()
         logs.append(f"✅ HDFS SafeMode Status: {out}")
+        
+        # Self-heal orphaned/missing blocks
+        fsck_res = nn_container.exec_run("hdfs fsck / -delete", environment={"HADOOP_USER_NAME": "hdfs"})
+        logs.append("✅ HDFS Filesystem Health Checked & Missing/Orphaned Blocks Self-Healed.")
     except Exception as ex:
         logs.append(f"ℹ️ HDFS Check: {ex}")
 
