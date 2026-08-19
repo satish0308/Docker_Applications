@@ -1,0 +1,17 @@
+{
+  "active_profile": "\ud83d\udd34 Heavy (Large Big Data / >10M Rows)",
+  "params": {
+    "driver_memory": "4g",
+    "executor_memory": "8g",
+    "executor_cores": 4,
+    "max_cores": 8,
+    "shuffle_partitions": 200,
+    "aqe_enabled": true,
+    "aqe_coalesce": true,
+    "memory_fraction": 0.8,
+    "storage_fraction": 0.5,
+    "offheap_enabled": true,
+    "offheap_size": "2g",
+    "kryo_serializer": true
+  }
+}

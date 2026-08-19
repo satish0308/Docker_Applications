@@ -902,24 +902,43 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
         col_sc1, col_sc2 = st.columns([2, 1])
         with col_sc1:
             target_scale = st.slider(
-                "Target Worker Count:",
+                "Target Worker Node Count:",
                 min_value=1,
                 max_value=8,
                 value=max(1, metrics['alive_workers']),
-                help="Each worker node provides 4 CPU Cores and 4GB Memory."
+                help="Number of distributed worker node containers."
             )
-            est_cores = target_scale * 4
-            est_ram = target_scale * 4
-            st.info(f"📊 Projected Cluster Capacity: **{est_cores} Total CPU Cores** & **{est_ram} GB Total Cluster RAM**")
+            col_ns1, col_ns2 = st.columns(2)
+            with col_ns1:
+                sel_worker_ram = st.selectbox(
+                    "RAM per Worker Node",
+                    ["4g", "8g", "16g", "32g"],
+                    index=1,
+                    help="Hardware memory envelope allocated per worker daemon."
+                )
+            with col_ns2:
+                sel_worker_cores = st.selectbox(
+                    "CPU Cores per Worker Node",
+                    [2, 4, 8, 16],
+                    index=1,
+                    help="CPU cores pool allocated per worker daemon."
+                )
+
+            ram_int = int(re.sub(r'[^0-9]', '', sel_worker_ram))
+            est_cores = target_scale * sel_worker_cores
+            est_ram = target_scale * ram_int
+            st.info(f"📊 Projected Cluster Capacity: **{est_cores} Total CPU Cores** & **{est_ram} GB Total Cluster RAM** across **{target_scale} Worker(s)** ({sel_worker_ram} RAM / {sel_worker_cores} Cores per node)")
         with col_sc2:
             st.write("")
             st.write("")
-            if st.button("🚀 Apply Worker Scale", type="primary", key="btn_apply_scale"):
-                with st.spinner(f"Scaling cluster to {target_scale} worker node(s)..."):
-                    out, code = spark_tuning_manager.scale_cluster_workers(target_scale)
+            st.write("")
+            st.write("")
+            if st.button("🚀 Apply Worker Scale & Node Sizing", type="primary", key="btn_apply_scale"):
+                with st.spinner(f"Provisioning {target_scale} worker node(s) with {sel_worker_ram} RAM & {sel_worker_cores} Cores..."):
+                    out, code = spark_tuning_manager.scale_cluster_workers(target_scale, sel_worker_ram, sel_worker_cores)
                     if code == 0:
-                        st.success(f"🎉 Successfully scaled cluster to {target_scale} worker(s)!")
-                        time.sleep(1)
+                        st.success(f"🎉 {out}")
+                        time.sleep(2)
                         st.rerun()
                     else:
                         st.error(f"❌ Failed to scale workers: {out}")

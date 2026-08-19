@@ -219,6 +219,7 @@ def get_spark_master_metrics():
             total_mem = data.get("memory", 0)
             mem_used = data.get("memoryused", 0)
             active_apps = data.get("activeapps", [])
+            sorted_workers = sorted(workers, key=lambda w: (0 if w.get("state") == "ALIVE" else 1, w.get("id", "")))
             return {
                 "status": "connected",
                 "master_url": data.get("url", "spark://spark:7077"),
@@ -242,7 +243,7 @@ def get_spark_master_metrics():
                         "Memory Used (MB)": w.get("memoryused", 0),
                         "State": "🟢 " + w.get("state", "") if w.get("state") == "ALIVE" else "🔴 " + w.get("state", "")
                     }
-                    for w in workers
+                    for w in sorted_workers
                 ]
             }
         except Exception:
@@ -263,8 +264,8 @@ def get_spark_master_metrics():
         "worker_list": []
     }
 
-def scale_cluster_workers(target_count):
-    """Scales Spark Worker containers up or down dynamically via Python Docker SDK."""
+def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
+    """Scales Spark Worker containers up or down and configures node memory & CPU capacity."""
     try:
         client = docker.from_env()
         all_workers = [
@@ -272,12 +273,6 @@ def scale_cluster_workers(target_count):
             if ("spark-worker" in c.name or "spark_worker" in c.name)
         ]
         
-        running_workers = [c for c in all_workers if c.status == "running"]
-        current_count = len(running_workers)
-
-        if target_count == current_count:
-            return f"Cluster is already running at {target_count} worker(s).", 0
-
         template_worker = all_workers[0] if all_workers else None
         if not template_worker:
             return "No base spark-worker container found.", 1
@@ -285,13 +280,14 @@ def scale_cluster_workers(target_count):
         image_name = template_worker.image.tags[0] if template_worker.image.tags else template_worker.image.id
         network_name = list(template_worker.attrs['NetworkSettings']['Networks'].keys())[0] if template_worker.attrs['NetworkSettings']['Networks'] else "hadoop-network"
         binds = template_worker.attrs['HostConfig']['Binds'] or []
-        env = template_worker.attrs['Config']['Env'] or [
+        entrypoint = template_worker.attrs['Config']['Entrypoint'] or ["/home/sparkuser/start-spark2.sh"]
+
+        target_env = [
             "SPARK_MODE=worker",
             "SPARK_MASTER_URL=spark://spark:7077",
-            "SPARK_WORKER_CORES=4",
-            "SPARK_WORKER_MEMORY=4g"
+            f"SPARK_WORKER_CORES={worker_cores}",
+            f"SPARK_WORKER_MEMORY={worker_memory}"
         ]
-        entrypoint = template_worker.attrs['Config']['Entrypoint'] or ["/home/sparkuser/start-spark2.sh"]
 
         vol_map = {}
         for b in binds:
@@ -302,42 +298,61 @@ def scale_cluster_workers(target_count):
                 mode = parts[2] if len(parts) > 2 else "rw"
                 vol_map[host_p] = {"bind": cont_p, "mode": mode}
 
-        if target_count > current_count:
-            added = 0
-            for i in range(1, target_count + 15):
-                active_now = len([c for c in client.containers.list(all=True) if ("spark-worker" in c.name or "spark_worker" in c.name) and c.status == "running"])
-                if active_now >= target_count:
-                    break
-                w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
-                try:
-                    c = client.containers.get(w_name)
-                    if c.status != "running":
-                        c.start()
-                        added += 1
-                except docker.errors.NotFound:
-                    client.containers.run(
-                        image=image_name,
-                        name=w_name,
-                        detach=True,
-                        environment=env,
-                        network=network_name,
-                        volumes=vol_map,
-                        entrypoint=entrypoint
-                    )
-                    added += 1
-            return f"Successfully scaled UP to {target_count} worker nodes (added/started {added} worker(s)).", 0
+        # Check if existing workers need re-provisioning due to RAM or Core change
+        running_workers = [c for c in all_workers if c.status == "running"]
+        current_count = len(running_workers)
 
-        elif target_count < current_count:
-            to_stop = current_count - target_count
-            stopped = 0
-            running_sorted = sorted(running_workers, key=lambda x: x.name, reverse=True)
-            for c in running_sorted:
-                if stopped >= to_stop:
-                    break
-                c.stop(timeout=5)
+        # Remove all existing workers if sizing (RAM/Cores) changed
+        sizing_changed = False
+        for c in running_workers:
+            c_env = c.attrs['Config']['Env'] or []
+            if f"SPARK_WORKER_MEMORY={worker_memory}" not in c_env or f"SPARK_WORKER_CORES={worker_cores}" not in c_env:
+                sizing_changed = True
+                break
+
+        if sizing_changed:
+            for c in all_workers:
+                try:
+                    c.stop(timeout=3)
+                    c.remove(force=True)
+                except Exception:
+                    pass
+            all_workers = []
+            running_workers = []
+            current_count = 0
+
+        # Launch target_count workers with requested RAM and Cores
+        added = 0
+        for i in range(1, target_count + 1):
+            w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
+            try:
+                c = client.containers.get(w_name)
+                if c.status != "running":
+                    c.start()
+                    added += 1
+            except docker.errors.NotFound:
+                client.containers.run(
+                    image=image_name,
+                    name=w_name,
+                    detach=True,
+                    environment=target_env,
+                    network=network_name,
+                    volumes=vol_map,
+                    entrypoint=entrypoint
+                )
+                added += 1
+
+        # Stop any excess workers beyond target_count
+        for i in range(target_count + 1, target_count + 20):
+            w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
+            try:
+                c = client.containers.get(w_name)
+                c.stop(timeout=3)
                 c.remove(force=True)
-                stopped += 1
-            return f"Successfully scaled DOWN to {target_count} worker nodes (stopped/removed {stopped} worker(s)).", 0
+            except Exception:
+                pass
+
+        return f"Successfully provisioned {target_count} worker node(s) with {worker_memory} RAM & {worker_cores} Cores each!", 0
 
     except Exception as e:
         return f"Error scaling workers: {str(e)}", 1
