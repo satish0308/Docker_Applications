@@ -344,6 +344,7 @@ menu = st.sidebar.radio(
         "⏳ Delta Time-Travel & Maintenance",
         "⏰ Scheduled Ingestion Jobs",
         "🗄️ Metastore Table Explorer",
+        "📚 Platform Docs & Guide Center",
         "📊 Cluster Health & Links",
         "🧹 One-Click Cleanup",
         "🔍 Cluster Diagnostics",
@@ -1651,6 +1652,108 @@ elif menu == "🗄️ Metastore Table Explorer":
                     st.link_button("🎨 Open in Hue Query Editor", "http://localhost:8888")
     else:
         st.info("No tables currently registered in Hive Metastore.")
+
+# -------------------------------------------------------------
+# TAB: PLATFORM DOCS & GUIDE CENTER
+# -------------------------------------------------------------
+elif menu == "📚 Platform Docs & Guide Center":
+    st.header("📚 Big Data Platform Documentation & Feature Catalog")
+    st.markdown(
+        "Interactive documentation, benchmark reports, and feature catalogs for the entire Big Data stack."
+    )
+
+    t_docs_viewer, t_feature_catalog = st.tabs([
+        "📖 Interactive Guide & Benchmark Reader",
+        "🌟 Platform Feature Catalog & Architecture"
+    ])
+
+    with t_docs_viewer:
+        doc_files = {
+            "⚡ Spark Performance Tuning Benchmark (59.18M Rows)": "/app/docs/spark_performance_tuning_benchmark.md",
+            "⚡ Spark Dynamic Tuning & Cluster Scaling Guide": "/app/docs/spark_tuning_scaling_guide.md",
+            "📦 Table & Full Database Disaster Recovery Guide": "/app/docs/table_backup_restore_guide.md",
+            "🚀 Production Data Pipeline & Delta Performance Guide": "/app/docs/data_pipeline_delta_guide.md",
+            "📖 Platform Architecture & Quickstart (README.md)": "/app/README.md"
+        }
+
+        available_docs = {}
+        for title, path in doc_files.items():
+            alt_paths = [path, path.replace("/app/", ""), path.replace("/app/docs/", "docs/")]
+            for ap in alt_paths:
+                if os.path.exists(ap):
+                    available_docs[title] = ap
+                    break
+
+        if available_docs:
+            col_d1, col_d2 = st.columns([3, 1])
+            with col_d1:
+                selected_doc_title = st.selectbox("Select Documentation Guide to View:", list(available_docs.keys()))
+            
+            selected_path = available_docs[selected_doc_title]
+            try:
+                with open(selected_path, "r", encoding="utf-8") as f:
+                    doc_content = f.read()
+
+                with col_d2:
+                    st.write("")
+                    st.write("")
+                    st.download_button(
+                        label="📥 Download Markdown (.md)",
+                        data=doc_content,
+                        file_name=os.path.basename(selected_path),
+                        mime="text/markdown"
+                    )
+
+                st.markdown("---")
+                st.markdown(doc_content)
+            except Exception as e:
+                st.error(f"Error reading documentation file {selected_path}: {e}")
+        else:
+            st.warning("⚠️ Documentation files not found at `/app/docs`. Mount `./docs:/app/docs` in docker-compose.yml.")
+
+    with t_feature_catalog:
+        st.subheader("🌟 Enterprise Big Data Platform Feature Catalog")
+        
+        col_fc1, col_fc2 = st.columns(2)
+        with col_fc1:
+            st.markdown("""
+            ### 📥 1. Zero-Friction Data Ingestion Studio
+            * **Multi-File Batch Upload**: Upload CSV, Parquet, and JSON files up to 1,000 GB.
+            * **Automated Column Sanitization**: Fixes spaces, brackets, dots, and special characters to prevent Parquet SerDe errors.
+            * **Interactive Data Type Overrides**: Cast columns dynamically before saving.
+            * **Dynamic Partitioning**: Writes partitioned datasets with automatic `MSCK REPAIR TABLE` for sub-second query pruning in Hue.
+
+            ### ⚡ 2. Spark Dynamic Tuning & Cluster Scaling
+            * **Elastic Worker Fleet**: Scale from 1 to 8+ worker nodes on-demand with 0 downtime.
+            * **Per-Worker Node Sizing**: Configure `4g`, `8g`, `16g`, or `32g` RAM and 2-16 CPU cores per node.
+            * **Workload Sizing Profiles**: Pre-engineered Light, Medium, Heavy, and Extreme configurations.
+            * **Zero-OOM Protection**: Adaptive Query Execution (AQE), Kryo fast serialization, and Off-Heap memory.
+
+            ### 📦 3. Zero-Corruption Backup & Disaster Recovery
+            * **Single Table & Full Database Backups**: Complete snapshot of both DDL metadata and underlying data chunks.
+            * **SHA-256 Checksums**: Cryptographically validates every file before restore.
+            * **1-Click Restore**: Restores data and registers tables in PostgreSQL Hive Metastore.
+            * **Tarball Downloads**: Download `.tar.gz` backup packages directly to your workstation.
+            """)
+
+        with col_fc2:
+            st.markdown("""
+            ### ⏳ 4. Delta Lake Time-Travel & Maintenance
+            * **ACID Commit History**: Visual history of every transaction version, operation, and timestamp.
+            * **Time-Travel Snapshots**: Query any historical table state via `VERSION AS OF <n>`.
+            * **1-Click Rollback**: Instantly restore tables to any historical snapshot.
+            * **Storage Compaction (`OPTIMIZE`)**: Merges small files and clusters data with multi-column **Z-Ordering**.
+            * **Space Reclamation (`VACUUM`)**: Purges unreferenced historical files.
+
+            ### ⏰ 5. Automated Batch Job Scheduler
+            * **Directory Watchers**: Monitor incoming directories (`hdfs://namenode:9000/data/incoming/*.csv` or host folders).
+            * **Recurring Intervals**: Hourly, Daily, Every 5 minutes, or On-Demand.
+            * **Persistent Registry**: Saved to `/app/scheduled_jobs.json`.
+
+            ### 🔐 6. Enterprise Identity & SSO (Keycloak IAM)
+            * **OIDC STS Authentication**: Single sign-on for Hue Query Editor, MinIO S3 Console, and JupyterLab.
+            * **Role-Based Access**: Pre-configured `admin` and `bigdata` realms.
+            """)
 
 # -------------------------------------------------------------
 # TAB 5: CLUSTER HEALTH & LINKS

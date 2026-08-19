@@ -299,6 +299,8 @@ services:
       - ./python_scripts:/app/python_scripts
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - ./docs:/app/docs:ro
+      - ./README.md:/app/README.md:ro
       - ./backups:/backups
     networks:
       - hadoop-network
