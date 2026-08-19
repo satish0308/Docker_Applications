@@ -168,8 +168,6 @@ services:
     build:
       context: .
       dockerfile: spark.Dockerfile
-    container_name: spark-worker
-    hostname: spark-worker
     volumes:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
@@ -182,8 +180,8 @@ services:
       - SPARK_WORKER_MEMORY=4g
     depends_on:
       - spark
-    ports:
-      - "8082:8081"
+    expose:
+      - "8081"
     networks:
       - hadoop-network
 
@@ -300,6 +298,9 @@ services:
       - ./admin_panel:/app
       - ./python_scripts:/app/python_scripts
       - ./scripts:/app/scripts
+      - ./config:/app/config
+      - ./docs:/app/docs:ro
+      - ./README.md:/app/README.md:ro
       - ./backups:/backups
     networks:
       - hadoop-network

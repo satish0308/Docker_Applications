@@ -1,0 +1,177 @@
+[
+  {
+    "test_name": "test_1_baseline",
+    "total_dataset_rows": 59181090,
+    "config": {
+      "master": "spark://spark:7077",
+      "driver_memory": "1g",
+      "executor_memory": "2g",
+      "executor_cores": "2",
+      "max_cores": "2",
+      "shuffle_partitions": "16",
+      "aqe_enabled": "false",
+      "serializer": "default"
+    },
+    "metrics": {
+      "workload_1_aggregation_sec": 5.157,
+      "workload_2_groupby_rollup_sec": 6.015,
+      "workload_3_window_ranking_sec": 6.481,
+      "total_execution_sec": 17.653
+    },
+    "test_definition": {
+      "id": "test_1_baseline",
+      "name": "1. Baseline (Unoptimized / 1 Worker / 2GB RAM / 2 Cores)",
+      "workers": 1,
+      "worker_ram": "4g",
+      "worker_cores": 4,
+      "driver_mem": "1g",
+      "exec_mem": "2g",
+      "exec_cores": 2,
+      "max_cores": 2,
+      "shuffle_partitions": 16,
+      "aqe": "false",
+      "kryo": false,
+      "offheap": false
+    }
+  },
+  {
+    "test_name": "test_2_tuned_single",
+    "total_dataset_rows": 59181090,
+    "config": {
+      "master": "spark://spark:7077",
+      "driver_memory": "2g",
+      "executor_memory": "4g",
+      "executor_cores": "4",
+      "max_cores": "4",
+      "shuffle_partitions": "64",
+      "aqe_enabled": "true",
+      "serializer": "org.apache.spark.serializer.KryoSerializer"
+    },
+    "metrics": {
+      "workload_1_aggregation_sec": 85.23,
+      "workload_2_groupby_rollup_sec": 3.636,
+      "workload_3_window_ranking_sec": 3.08,
+      "total_execution_sec": 91.946
+    },
+    "test_definition": {
+      "id": "test_2_tuned_single",
+      "name": "2. Tuned Single Worker (4GB RAM / 4 Cores / AQE / Kryo)",
+      "workers": 1,
+      "worker_ram": "8g",
+      "worker_cores": 4,
+      "driver_mem": "2g",
+      "exec_mem": "4g",
+      "exec_cores": 4,
+      "max_cores": 4,
+      "shuffle_partitions": 64,
+      "aqe": "true",
+      "kryo": true,
+      "offheap": false
+    }
+  },
+  {
+    "test_name": "test_3_dual_worker_medium",
+    "total_dataset_rows": 59181090,
+    "config": {
+      "master": "spark://spark:7077",
+      "driver_memory": "2g",
+      "executor_memory": "4g",
+      "executor_cores": "4",
+      "max_cores": "8",
+      "shuffle_partitions": "64",
+      "aqe_enabled": "true",
+      "serializer": "org.apache.spark.serializer.KryoSerializer"
+    },
+    "metrics": {
+      "workload_1_aggregation_sec": 4.768,
+      "workload_2_groupby_rollup_sec": 4.42,
+      "workload_3_window_ranking_sec": 3.837,
+      "total_execution_sec": 13.025
+    },
+    "test_definition": {
+      "id": "test_3_dual_worker_medium",
+      "name": "3. Dual Workers Scaled (2 Workers / 8 Cores / 16GB Total RAM)",
+      "workers": 2,
+      "worker_ram": "8g",
+      "worker_cores": 4,
+      "driver_mem": "2g",
+      "exec_mem": "4g",
+      "exec_cores": 4,
+      "max_cores": 8,
+      "shuffle_partitions": 64,
+      "aqe": "true",
+      "kryo": true,
+      "offheap": false
+    }
+  },
+  {
+    "test_name": "test_4_dual_worker_heavy",
+    "total_dataset_rows": 59181090,
+    "config": {
+      "master": "spark://spark:7077",
+      "driver_memory": "4g",
+      "executor_memory": "8g",
+      "executor_cores": "4",
+      "max_cores": "8",
+      "shuffle_partitions": "200",
+      "aqe_enabled": "true",
+      "serializer": "org.apache.spark.serializer.KryoSerializer"
+    },
+    "metrics": {
+      "workload_1_aggregation_sec": 8.003,
+      "workload_2_groupby_rollup_sec": 5.125,
+      "workload_3_window_ranking_sec": 3.317,
+      "total_execution_sec": 16.445
+    },
+    "test_definition": {
+      "id": "test_4_dual_worker_heavy",
+      "name": "4. Heavy ETL Sizing (2 Workers / 8GB per Exec / 200 Partitions / Off-Heap)",
+      "workers": 2,
+      "worker_ram": "8g",
+      "worker_cores": 4,
+      "driver_mem": "4g",
+      "exec_mem": "8g",
+      "exec_cores": 4,
+      "max_cores": 8,
+      "shuffle_partitions": 200,
+      "aqe": "true",
+      "kryo": true,
+      "offheap": true
+    }
+  },
+  {
+    "test_name": "test_5_triple_worker_extreme",
+    "total_dataset_rows": 59181090,
+    "config": {
+      "master": "spark://spark:7077",
+      "driver_memory": "4g",
+      "executor_memory": "8g",
+      "executor_cores": "4",
+      "max_cores": "12",
+      "shuffle_partitions": "200",
+      "aqe_enabled": "true",
+      "serializer": "org.apache.spark.serializer.KryoSerializer"
+    },
+    "metrics": {
+      "workload_1_aggregation_sec": 6.784,
+      "workload_2_groupby_rollup_sec": 4.391,
+      "workload_3_window_ranking_sec": 3.86,
+      "total_execution_sec": 15.035
+    },
+    "test_definition": {
+      "id": "test_5_triple_worker_extreme",
+      "name": "5. Extreme Fleet Scaling (3 Workers / 12 Cores / 24GB Total RAM / 200 Partitions)",
+      "workers": 3,
+      "worker_ram": "8g",
+      "worker_cores": 4,
+      "driver_mem": "4g",
+      "exec_mem": "8g",
+      "exec_cores": 4,
+      "max_cores": 12,
+      "shuffle_partitions": 200,
+      "aqe": "true",
+      "kryo": true,
+      "offheap": true
+    }
+  }
+]
