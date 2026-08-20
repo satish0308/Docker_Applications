@@ -144,8 +144,48 @@ def update_spark_defaults_conf(params):
             except Exception as e:
                 print(f"Error updating {p}: {e}")
 
+def update_livy_conf(params):
+    """Updates livy/conf/livy.conf with tuned parameters so interactive Livy sessions inherit Admin Panel tuning."""
+    livy_paths = ["/app/livy/conf/livy.conf", "livy/conf/livy.conf"]
+    for p in livy_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r") as f:
+                    lines = f.readlines()
+                
+                tune_map = {
+                    "livy.spark.executor.cores": str(params.get("executor_cores", 2)),
+                    "livy.spark.executor.memory": str(params.get("executor_memory", "4g")),
+                    "livy.spark.cores.max": str(params.get("max_cores", 6)),
+                    "livy.spark.driver.memory": str(params.get("driver_memory", "2g"))
+                }
+                
+                updated_lines = []
+                seen_keys = set()
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#") and "=" in stripped:
+                        k, v = stripped.split("=", 1)
+                        k = k.strip()
+                        if k in tune_map:
+                            updated_lines.append(f"{k} = {tune_map[k]}\n")
+                            seen_keys.add(k)
+                        else:
+                            updated_lines.append(line)
+                    else:
+                        updated_lines.append(line)
+                
+                for k, v in tune_map.items():
+                    if k not in seen_keys:
+                        updated_lines.append(f"{k} = {v}\n")
+                
+                with open(p, "w") as f:
+                    f.writelines(updated_lines)
+            except Exception as e:
+                print(f"Error updating Livy conf {p}: {e}")
+
 def save_tuning_config(config_dict):
-    """Saves active Spark tuning configuration and syncs spark-defaults.conf."""
+    """Saves active Spark tuning configuration, syncs spark-defaults.conf & livy.conf, and reloads Livy."""
     paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
     for p in paths:
         try:
@@ -156,6 +196,13 @@ def save_tuning_config(config_dict):
             pass
     if "params" in config_dict:
         update_spark_defaults_conf(config_dict["params"])
+        update_livy_conf(config_dict["params"])
+        try:
+            client = docker.from_env()
+            livy_c = client.containers.get("livy")
+            livy_c.restart(timeout=3)
+        except Exception:
+            pass
 
 def recommend_profile_for_filesize(size_in_bytes):
     """Recommends an optimal Spark profile based on uploaded dataset size."""
