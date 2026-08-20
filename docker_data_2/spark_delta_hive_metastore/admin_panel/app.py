@@ -471,11 +471,32 @@ if menu == "📥 Data Ingestion & Partitioning":
                         pass
 
     else:
-        st.info("💡 **Direct Path Mode**: Ingest large files (5GB, 20GB, 50GB+) directly from your Windows disk or HDFS without browser upload overhead.")
+        st.info("💡 **Direct Path Mode**: Ingest large files (5GB, 20GB, 50GB+) directly from your local `./data` folder or HDFS without browser upload overhead.")
+        
+        # Scan files in /data mount
+        local_data_files = []
+        if os.path.exists("/data"):
+            try:
+                for root, dirs, files in os.walk("/data"):
+                    for f in files:
+                        if not f.startswith(".") and f != "README.md":
+                            local_data_files.append(os.path.join(root, f))
+            except Exception:
+                pass
+
+        default_path = "hdfs://namenode:9000/data/benchmark/sales_train_evaluation.csv"
+        if local_data_files:
+            st.markdown("📁 **Detected files in your local `./data` directory:**")
+            col_sel1, col_sel2 = st.columns([3, 1])
+            with col_sel1:
+                selected_data_file = st.selectbox("Quick-Select local data file:", ["-- Custom / HDFS Path --"] + local_data_files)
+            if selected_data_file != "-- Custom / HDFS Path --":
+                default_path = selected_data_file
+
         path_input = st.text_input(
-            "Enter Host Path (Windows/WSL) or HDFS Path / Wildcard:",
-            value="hdfs://namenode:9000/data/benchmark/sales_train_evaluation.csv",
-            help="Example: /mnt/c/Users/satish.hiremath/.../sales.csv or hdfs://namenode:9000/data/breweries.csv or /data/*.csv"
+            "Enter Host Path (Windows/WSL), Local `./data` Path, or HDFS Path / Wildcard:",
+            value=default_path,
+            help="Example: /data/sales.csv or /data/*.csv or hdfs://namenode:9000/data/raw/*.csv"
         )
         if path_input:
             input_file_path = path_input.strip()
