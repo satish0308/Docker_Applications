@@ -750,32 +750,19 @@ if menu == "📥 Data Ingestion & Partitioning":
                 for ipath in input_file_paths:
                     if ipath.startswith("hdfs://"):
                         staged_source_paths.append(ipath)
-                    elif ipath.startswith("/data"):
-                        # If not already in HDFS, synchronize from local mount to HDFS
-                        check_res = namenode_cont.exec_run(f"hdfs dfs -test -e {ipath}")
-                        if check_res.exit_code != 0:
-                            status_text.info(f"⏳ Synchronizing `{ipath}` into HDFS storage cluster...")
-                            namenode_cont.exec_run("hdfs dfs -mkdir -p /data")
-                            put_res = namenode_cont.exec_run(f"hdfs dfs -put -f {ipath} /data/")
-                            if put_res.exit_code != 0:
-                                pass
-                        staged_source_paths.append(f"hdfs://namenode:9000{ipath}")
-                    elif os.path.exists(ipath):
-                        fname = os.path.basename(ipath)
-                        staging_hdfs_path = f"/data/uploads/{fname}"
-                        status_text.info(f"⏳ Streaming host file `{fname}` into HDFS...")
-                        
-                        with open(ipath, "rb") as f:
-                            file_bytes = f.read()
-                        copy_data_to_container(namenode_cont, file_bytes, "/tmp", fname)
-                        
-                        put_res = namenode_cont.exec_run(f"hdfs dfs -put -f /tmp/{fname} {staging_hdfs_path}")
-                        if put_res.exit_code != 0:
-                            raise Exception(f"Failed to put {fname} into HDFS")
-                        namenode_cont.exec_run(f"rm -f /tmp/{fname}")
-                        staged_source_paths.append(f"hdfs://namenode:9000{staging_hdfs_path}")
+                    elif os.path.isdir(ipath):
+                        # Expand all files in directory (ignoring hidden & Zone.Identifier files)
+                        sub_files = [
+                            os.path.join(ipath, f) for f in sorted(os.listdir(ipath))
+                            if not f.startswith('.') and ':Zone.Identifier' not in f and f != '_SUCCESS'
+                        ]
+                        staged_source_paths.extend(sub_files)
+                    elif os.path.isfile(ipath):
+                        staged_source_paths.append(ipath)
+                    else:
+                        staged_source_paths.append(ipath)
 
-            status_text.info("⏳ Step 2/4: Generating dynamic PySpark schema, partitions, and type casting script...")
+            status_text.info(f"⏳ Step 2/4: Generating PySpark chunked ingestion script for {len(staged_source_paths)} files...")
             progress_bar.progress(40)
 
             # Determine storage destination
@@ -788,7 +775,7 @@ if menu == "📥 Data Ingestion & Partitioning":
             save_mode = "overwrite" if "Overwrite" in write_mode else "append"
             is_delta = "Delta Lake" in output_format
 
-            # Build PySpark Ingestion Script
+            # Build PySpark Ingestion Script with Chunked Micro-Batch Processing
             spark_script = f"""
 import time
 import re
@@ -797,77 +784,82 @@ from pyspark.sql import functions as F
 
 spark = SparkSession.builder \\
     .appName("UI_Ingestion_{target_table}") \\
-    .config("spark.driver.memory", "{chosen_ingest_params.get('driver_memory', '2g')}") \\
-    .config("spark.executor.memory", "{chosen_ingest_params.get('executor_memory', '3g')}") \\
-    .config("spark.sql.shuffle.partitions", "{chosen_ingest_params.get('shuffle_partitions', 64)}") \\
+    .config("spark.driver.memory", "{chosen_ingest_params.get('driver_memory', '4g')}") \\
+    .config("spark.executor.memory", "{chosen_ingest_params.get('executor_memory', '8g')}") \\
+    .config("spark.executor.cores", "{chosen_ingest_params.get('executor_cores', 4)}") \\
+    .config("spark.cores.max", "{chosen_ingest_params.get('max_cores', 8)}") \\
+    .config("spark.sql.shuffle.partitions", "{chosen_ingest_params.get('shuffle_partitions', 200)}") \\
+    .config("spark.sql.adaptive.enabled", "true") \\
+    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \\
+    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
 t0 = time.time()
 source_paths = {json.dumps(staged_source_paths)}
-print(f"--> Reading source files: {{source_paths}}")
-"""
-            if file_format == "csv":
-                spark_script += f"""
-df = spark.read \\
-    .option("header", "true") \\
-    .option("inferSchema", "true") \\
-    .csv(source_paths)
-"""
-            elif file_format == "parquet":
-                spark_script += f"""
-df = spark.read.parquet(*source_paths)
-"""
-            elif file_format == "json":
-                spark_script += f"""
-df = spark.read.json(source_paths)
-"""
+total_files = len(source_paths)
+print(f"--> Total source files to ingest: {{total_files}}")
 
-            spark_script += f"""
-# 1. Sanitize all column names for universal Hive, Parquet, and Hue SQL compatibility
-for c in df.columns:
-    clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
-    clean_c = re.sub(r'_+', '_', clean_c).strip('_')
-    if clean_c and clean_c[0].isdigit():
-        clean_c = f"col_{{clean_c}}"
-    clean_c = clean_c if clean_c else "unnamed_col"
-    if clean_c != c:
-        df = df.withColumnRenamed(c, clean_c)
+CHUNK_SIZE = 100
+total_batches = (total_files + CHUNK_SIZE - 1) // CHUNK_SIZE if total_files > 0 else 1
+total_rows_ingested = 0
 
-# 2. Apply Custom Column Data Type Overrides
 type_overrides = {json.dumps(type_overrides)}
-for col_name, target_type in type_overrides.items():
-    if col_name in df.columns:
-        print(f"--> Casting column '{{col_name}}' to '{{target_type}}'...")
-        df = df.withColumn(col_name, F.col(col_name).cast(target_type))
-
-# 3. Dynamic Partitioning & Table Save
-writer = df.write.mode("{save_mode}").option("path", "{dest_path}")
 partitions = {json.dumps(selected_partitions)}
-if partitions:
-    print(f"--> Applying Dynamic Partitions: {{partitions}}")
-    writer = writer.partitionBy(*partitions)
-"""
 
-            if is_delta:
-                spark_script += f"""
-writer.format("delta").saveAsTable("{target_db}.{target_table}")
-"""
-            else:
-                spark_script += f"""
-writer.saveAsTable("{target_db}.{target_table}")
-if partitions:
+for batch_idx in range(total_batches):
+    batch_files = source_paths[batch_idx * CHUNK_SIZE : (batch_idx + 1) * CHUNK_SIZE]
+    print(f"\\n--> 🚀 [Batch {{batch_idx+1}}/{{total_batches}}] Reading {{len(batch_files)}} files (Files {{batch_idx*CHUNK_SIZE + 1}} to {{min((batch_idx+1)*CHUNK_SIZE, total_files)}})...")
+    
+    if "{file_format}" == "parquet":
+        df_batch = spark.read.parquet(*batch_files)
+    elif "{file_format}" == "json":
+        df_batch = spark.read.json(batch_files)
+    else:
+        df_batch = spark.read.option("header", "true").option("inferSchema", "true").csv(batch_files)
+
+    # 1. Sanitize column names
+    for c in df_batch.columns:
+        clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+        clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+        if clean_c and clean_c[0].isdigit():
+            clean_c = f"col_{{clean_c}}"
+        clean_c = clean_c if clean_c else "unnamed_col"
+        if clean_c != c:
+            df_batch = df_batch.withColumnRenamed(c, clean_c)
+
+    # 2. Apply Custom Column Data Type Overrides
+    for col_name, target_type in type_overrides.items():
+        if col_name in df_batch.columns:
+            print(f"--> Casting column '{{col_name}}' to '{{target_type}}'...")
+            df_batch = df_batch.withColumn(col_name, F.col(col_name).cast(target_type))
+
+    # 3. Dynamic Partitioning & Table Save (First batch respects save_mode, subsequent append)
+    current_mode = "{save_mode}" if batch_idx == 0 else "append"
+    writer = df_batch.write.mode(current_mode).option("path", "{dest_path}")
+    if partitions:
+        writer = writer.partitionBy(*partitions)
+
+    if {is_delta}:
+        writer.format("delta").saveAsTable("{target_db}.{target_table}")
+    else:
+        writer.saveAsTable("{target_db}.{target_table}")
+
+    batch_rows = df_batch.count()
+    total_rows_ingested += batch_rows
+    print(f"--> ✅ [Batch {{batch_idx+1}}/{{total_batches}}] Finished committing {{batch_rows:,}} rows (Cumulative: {{total_rows_ingested:,}} rows)")
+
+if partitions and not {is_delta}:
     try:
         spark.sql("MSCK REPAIR TABLE {target_db}.{target_table}")
     except Exception as e:
         print(f"--> MSCK Repair Note: {{e}}")
-"""
 
-            spark_script += f"""
-row_cnt = df.count()
 elapsed = time.time() - t0
-print(f"__RESULT_SUCCESS__|{{row_cnt}}|{{elapsed:.2f}}")
+print(f"\\n🏆 Ingestion Complete: {{total_rows_ingested:,}} total rows across {{total_files}} files in {{elapsed:.2f}}s")
+print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
 spark.stop()
+"""
 """
 
             status_text.info("⏳ Step 3/4: Executing distributed Spark ingestion & Metastore registration...")
