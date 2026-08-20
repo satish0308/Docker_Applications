@@ -175,6 +175,7 @@ services:
       - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
       - ./scripts/start-spark.sh:/home/sparkuser/start-spark2.sh
+      - ./data:/data
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark:7077
