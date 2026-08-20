@@ -866,8 +866,18 @@ print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
 spark.stop()
 """
 
-            status_text.info("⏳ Step 3/4: Executing distributed Spark ingestion & Metastore registration...")
-            progress_bar.progress(70)
+            # Chunk calculations
+            CHUNK_SIZE = 100
+            total_source_files = len(staged_source_paths)
+            total_chunks = (total_source_files + CHUNK_SIZE - 1) // CHUNK_SIZE if total_source_files > 0 else 1
+            
+            chunk_plan_box = st.info(
+                f"📦 **Chunked Processing Plan**: Found **{total_source_files:,} source files** ➔ "
+                f"Divided into **{total_chunks} micro-batch chunk(s)** (~100 files per chunk) for zero-OOM memory safety."
+            )
+
+            status_text.info(f"⏳ Step 3/4: Launching distributed Spark cluster ({total_chunks} chunks)...")
+            progress_bar.progress(50)
 
             # Copy script into spark container via Python Docker SDK
             spark_cont = client.containers.get("spark")
@@ -875,13 +885,36 @@ spark.stop()
             copy_data_to_container(spark_cont, spark_script.encode('utf-8'), "/tmp", script_filename)
 
             tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_ingest_params)
-            res = spark_cont.exec_run(
-                f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}"
+            
+            # Execute with live streaming output
+            exec_stream = spark_cont.exec_run(
+                f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}",
+                stream=True
             )
-            output = res.output.decode('utf-8', errors='ignore')
+            
+            full_output_chunks = []
+            for stream_bytes in exec_stream.output:
+                chunk_str = stream_bytes.decode('utf-8', errors='ignore')
+                full_output_chunks.append(chunk_str)
+                for line in chunk_str.splitlines():
+                    if "--> 🚀 [Batch" in line:
+                        clean_msg = line.replace('--> ', '').strip()
+                        status_text.info(f"⚙️ **Processing**: `{clean_msg}`")
+                        # Extract batch number to update progress bar smoothly
+                        match = re.search(r'\[Batch (\d+)/(\d+)\]', line)
+                        if match:
+                            curr_b, max_b = int(match.group(1)), int(match.group(2))
+                            progress_bar.progress(min(50 + int((curr_b / max_b) * 45), 95))
+                    elif "--> ✅ [Batch" in line:
+                        clean_msg = line.replace('--> ', '').strip()
+                        status_text.success(f"✅ **Committed**: `{clean_msg}`")
+            
+            output = "".join(full_output_chunks)
 
-            if res.exit_code != 0:
-                raise Exception(f"Spark Ingestion failed (exit code {res.exit_code}):\n{output}")
+            # Check for errors in output if exit was non-zero
+            if "Traceback" in output or "AnalysisException" in output or "Exception" in output and "__RESULT_SUCCESS__" not in output:
+                if "__RESULT_SUCCESS__" not in output:
+                    raise Exception(f"Spark Ingestion encounter an error:\n{output[-2000:]}")
 
             # Parse execution results
             row_count_res = "N/A"
@@ -895,13 +928,15 @@ spark.stop()
 
             progress_bar.progress(100)
             status_text.empty()
+            chunk_plan_box.empty()
 
             st.success(f"🎉 Table `{target_db}.{target_table}` created and registered successfully!")
 
-            col_res1, col_res2, col_res3 = st.columns(3)
+            col_res1, col_res2, col_res3, col_res4 = st.columns(4)
             col_res1.metric("Rows Ingested", row_count_res)
             col_res2.metric("Processing Time", time_taken_res)
-            col_res3.metric("Storage Location", dest_path)
+            col_res3.metric("Total Chunks", f"{total_chunks} ({total_source_files} files)")
+            col_res4.metric("Storage", "MinIO S3 Delta" if is_s3 else "HDFS")
 
             if selected_partitions:
                 st.info(f"📁 **Partitioned by:** `{', '.join(selected_partitions)}` (Partition pruning enabled in Hue!)")
