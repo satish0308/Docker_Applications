@@ -500,6 +500,9 @@ if menu == "📥 Data Ingestion & Partitioning":
         )
         if path_input:
             input_file_path = path_input.strip()
+            if input_file_path.startswith("data/"):
+                input_file_path = "/" + input_file_path
+            
             # Windows path translation if needed
             if re.match(r'^[a-zA-Z]:\\', input_file_path):
                 drive_letter = input_file_path[0].lower()
@@ -508,26 +511,50 @@ if menu == "📥 Data Ingestion & Partitioning":
                 st.caption(f"ℹ️ Translated Windows path to WSL: `{input_file_path}`")
             
             input_file_paths = [input_file_path]
-            base_filename = os.path.basename(input_file_path.replace('*', ''))
+            base_filename = os.path.basename(input_file_path.rstrip('/').replace('*', ''))
             base_table_name = sanitize_table_name(os.path.splitext(base_filename)[0])
             
-            if input_file_path.endswith(".parquet") or input_file_path.endswith(".pq"):
-                file_format = "parquet"
-            elif input_file_path.endswith(".json"):
-                file_format = "json"
+            # Detect format for file or directory
+            preview_sample_path = input_file_path
+            if os.path.isdir(input_file_path):
+                # Search for sample file inside directory
+                valid_files = [
+                    f for f in os.listdir(input_file_path)
+                    if not f.startswith('.') and ':Zone.Identifier' not in f and f != '_SUCCESS'
+                ]
+                if any(f.endswith(('.parquet', '.pq')) for f in valid_files):
+                    file_format = "parquet"
+                    parquet_samples = [f for f in valid_files if f.endswith(('.parquet', '.pq'))]
+                    if parquet_samples:
+                        preview_sample_path = os.path.join(input_file_path, parquet_samples[0])
+                elif any(f.endswith('.json') for f in valid_files):
+                    file_format = "json"
+                    json_samples = [f for f in valid_files if f.endswith('.json')]
+                    if json_samples:
+                        preview_sample_path = os.path.join(input_file_path, json_samples[0])
+                else:
+                    file_format = "csv"
+                    csv_samples = [f for f in valid_files if f.endswith(('.csv', '.tsv', '.txt'))]
+                    if csv_samples:
+                        preview_sample_path = os.path.join(input_file_path, csv_samples[0])
             else:
-                file_format = "csv"
+                if input_file_path.endswith((".parquet", ".pq")):
+                    file_format = "parquet"
+                elif input_file_path.endswith(".json"):
+                    file_format = "json"
+                else:
+                    file_format = "csv"
 
-            # Try sample preview if local path
-            if os.path.exists(input_file_path) and os.path.isfile(input_file_path):
+            # Try sample preview if local path or sample part file
+            if os.path.exists(preview_sample_path) and os.path.isfile(preview_sample_path):
                 try:
                     if file_format == "parquet":
-                        df_preview = pd.read_parquet(input_file_path)
+                        df_preview = pd.read_parquet(preview_sample_path).head(50)
                     elif file_format == "json":
-                        df_preview = pd.read_json(input_file_path, lines=True, nrows=50)
+                        df_preview = pd.read_json(preview_sample_path, lines=True, nrows=50)
                     else:
-                        df_preview = pd.read_csv(input_file_path, nrows=50)
-                except Exception:
+                        df_preview = pd.read_csv(preview_sample_path, nrows=50)
+                except Exception as prev_err:
                     pass
 
     # ---------------------------------------------------------
@@ -721,8 +748,18 @@ if menu == "📥 Data Ingestion & Partitioning":
             # 2. Process direct host / HDFS paths
             elif input_file_paths:
                 for ipath in input_file_paths:
-                    if ipath.startswith("hdfs://") or ipath.startswith("/data/"):
-                        staged_source_paths.append(ipath if ipath.startswith("hdfs://") else f"hdfs://namenode:9000{ipath}")
+                    if ipath.startswith("hdfs://"):
+                        staged_source_paths.append(ipath)
+                    elif ipath.startswith("/data"):
+                        # If not already in HDFS, synchronize from local mount to HDFS
+                        check_res = namenode_cont.exec_run(f"hdfs dfs -test -e {ipath}")
+                        if check_res.exit_code != 0:
+                            status_text.info(f"⏳ Synchronizing `{ipath}` into HDFS storage cluster...")
+                            namenode_cont.exec_run("hdfs dfs -mkdir -p /data")
+                            put_res = namenode_cont.exec_run(f"hdfs dfs -put -f {ipath} /data/")
+                            if put_res.exit_code != 0:
+                                pass
+                        staged_source_paths.append(f"hdfs://namenode:9000{ipath}")
                     elif os.path.exists(ipath):
                         fname = os.path.basename(ipath)
                         staging_hdfs_path = f"/data/uploads/{fname}"
