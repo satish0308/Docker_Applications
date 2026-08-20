@@ -14,8 +14,8 @@ sys.path.append("python_scripts")
 sys.path.append("/app/python_scripts")
 
 BENCHMARK_SCRIPT = "/opt/spark/python_scripts/spark_performance_benchmark.py"
-RESULTS_JSON_PATH = "python_scripts/benchmark_results.json"
-REPORT_MD_PATH = "docs/spark_performance_tuning_benchmark.md"
+RESULTS_JSON_PATH = "/app/python_scripts/benchmark_results.json" if os.path.exists("/app/python_scripts") else "python_scripts/benchmark_results.json"
+REPORT_MD_PATH = "/app/python_scripts/spark_performance_tuning_benchmark.md" if os.path.exists("/app/python_scripts") else "docs/spark_performance_tuning_benchmark.md"
 
 TEST_COMBINATIONS = [
     {

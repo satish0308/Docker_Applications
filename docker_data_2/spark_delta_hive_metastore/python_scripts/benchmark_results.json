@@ -1,7 +1,7 @@
 [
   {
     "test_name": "test_1_baseline",
-    "total_dataset_rows": 59181090,
+    "total_dataset_rows": 2349729507,
     "config": {
       "master": "spark://spark:7077",
       "driver_memory": "1g",
@@ -13,10 +13,10 @@
       "serializer": "default"
     },
     "metrics": {
-      "workload_1_aggregation_sec": 5.157,
-      "workload_2_groupby_rollup_sec": 6.015,
-      "workload_3_window_ranking_sec": 6.481,
-      "total_execution_sec": 17.653
+      "workload_1_aggregation_sec": 454.526,
+      "workload_2_groupby_rollup_sec": 120.488,
+      "workload_3_window_ranking_sec": 206.122,
+      "total_execution_sec": 781.136
     },
     "test_definition": {
       "id": "test_1_baseline",
@@ -36,7 +36,7 @@
   },
   {
     "test_name": "test_2_tuned_single",
-    "total_dataset_rows": 59181090,
+    "total_dataset_rows": 2349729507,
     "config": {
       "master": "spark://spark:7077",
       "driver_memory": "2g",
@@ -48,10 +48,10 @@
       "serializer": "org.apache.spark.serializer.KryoSerializer"
     },
     "metrics": {
-      "workload_1_aggregation_sec": 85.23,
-      "workload_2_groupby_rollup_sec": 3.636,
-      "workload_3_window_ranking_sec": 3.08,
-      "total_execution_sec": 91.946
+      "workload_1_aggregation_sec": 318.674,
+      "workload_2_groupby_rollup_sec": 95.344,
+      "workload_3_window_ranking_sec": 162.496,
+      "total_execution_sec": 576.514
     },
     "test_definition": {
       "id": "test_2_tuned_single",
@@ -71,7 +71,7 @@
   },
   {
     "test_name": "test_3_dual_worker_medium",
-    "total_dataset_rows": 59181090,
+    "total_dataset_rows": 2349729507,
     "config": {
       "master": "spark://spark:7077",
       "driver_memory": "2g",
@@ -83,10 +83,10 @@
       "serializer": "org.apache.spark.serializer.KryoSerializer"
     },
     "metrics": {
-      "workload_1_aggregation_sec": 4.768,
-      "workload_2_groupby_rollup_sec": 4.42,
-      "workload_3_window_ranking_sec": 3.837,
-      "total_execution_sec": 13.025
+      "workload_1_aggregation_sec": 267.872,
+      "workload_2_groupby_rollup_sec": 85.15,
+      "workload_3_window_ranking_sec": 118.207,
+      "total_execution_sec": 471.229
     },
     "test_definition": {
       "id": "test_3_dual_worker_medium",
@@ -106,7 +106,7 @@
   },
   {
     "test_name": "test_4_dual_worker_heavy",
-    "total_dataset_rows": 59181090,
+    "total_dataset_rows": 2349729507,
     "config": {
       "master": "spark://spark:7077",
       "driver_memory": "4g",
@@ -118,10 +118,10 @@
       "serializer": "org.apache.spark.serializer.KryoSerializer"
     },
     "metrics": {
-      "workload_1_aggregation_sec": 8.003,
-      "workload_2_groupby_rollup_sec": 5.125,
-      "workload_3_window_ranking_sec": 3.317,
-      "total_execution_sec": 16.445
+      "workload_1_aggregation_sec": 253.701,
+      "workload_2_groupby_rollup_sec": 69.538,
+      "workload_3_window_ranking_sec": 110.686,
+      "total_execution_sec": 433.925
     },
     "test_definition": {
       "id": "test_4_dual_worker_heavy",
@@ -141,7 +141,7 @@
   },
   {
     "test_name": "test_5_triple_worker_extreme",
-    "total_dataset_rows": 59181090,
+    "total_dataset_rows": 2349729507,
     "config": {
       "master": "spark://spark:7077",
       "driver_memory": "4g",
@@ -153,10 +153,10 @@
       "serializer": "org.apache.spark.serializer.KryoSerializer"
     },
     "metrics": {
-      "workload_1_aggregation_sec": 6.784,
-      "workload_2_groupby_rollup_sec": 4.391,
-      "workload_3_window_ranking_sec": 3.86,
-      "total_execution_sec": 15.035
+      "workload_1_aggregation_sec": 235.362,
+      "workload_2_groupby_rollup_sec": 70.171,
+      "workload_3_window_ranking_sec": 125.283,
+      "total_execution_sec": 430.816
     },
     "test_definition": {
       "id": "test_5_triple_worker_extreme",
