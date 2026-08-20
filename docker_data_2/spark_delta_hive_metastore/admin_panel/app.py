@@ -1011,6 +1011,12 @@ for batch_idx in range(total_batches):
             df_batch = df_batch.withColumn(col_name, F.col(col_name).cast(target_type))
 
     # 3. Dynamic Partitioning & Table Save (First batch respects save_mode, subsequent append)
+    if batch_idx == 0 and "{save_mode}" == "overwrite":
+        try:
+            spark.sql("DROP TABLE IF EXISTS {target_db}.{target_table}")
+        except Exception:
+            pass
+
     current_mode = "{save_mode}" if batch_idx == 0 else "append"
     if partitions:
         print(f"--> Optimizing partition distribution for: {{partitions}}")
@@ -1023,7 +1029,7 @@ for batch_idx in range(total_batches):
     if {is_delta}:
         writer.format("delta").saveAsTable("{target_db}.{target_table}")
     else:
-        writer.saveAsTable("{target_db}.{target_table}")
+        writer.format("parquet").saveAsTable("{target_db}.{target_table}")
 
     batch_rows = df_batch.count()
     total_rows_ingested += batch_rows
