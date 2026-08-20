@@ -298,6 +298,10 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
                 mode = parts[2] if len(parts) > 2 else "rw"
                 vol_map[host_p] = {"bind": cont_p, "mode": mode}
 
+        # Always ensure /data is mounted into every spark-worker container
+        host_data_dir = "/home/satish/Docker_Applications/docker_data_2/spark_delta_hive_metastore/data"
+        vol_map[host_data_dir] = {"bind": "/data", "mode": "rw"}
+
         # Check if existing workers need re-provisioning due to RAM or Core change
         running_workers = [c for c in all_workers if c.status == "running"]
         current_count = len(running_workers)

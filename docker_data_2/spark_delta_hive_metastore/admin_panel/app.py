@@ -809,6 +809,7 @@ partitions = {json.dumps(selected_partitions)}
 
 for batch_idx in range(total_batches):
     batch_files = source_paths[batch_idx * CHUNK_SIZE : (batch_idx + 1) * CHUNK_SIZE]
+    batch_files = [f"file://{{f}}" if not f.startswith("file://") and not f.startswith("hdfs://") and not f.startswith("s3a://") else f for f in batch_files]
     print(f"\\n--> 🚀 [Batch {{batch_idx+1}}/{{total_batches}}] Reading {{len(batch_files)}} files (Files {{batch_idx*CHUNK_SIZE + 1}} to {{min((batch_idx+1)*CHUNK_SIZE, total_files)}})...")
     
     if "{file_format}" == "parquet":
@@ -836,6 +837,10 @@ for batch_idx in range(total_batches):
 
     # 3. Dynamic Partitioning & Table Save (First batch respects save_mode, subsequent append)
     current_mode = "{save_mode}" if batch_idx == 0 else "append"
+    if partitions:
+        print(f"--> Optimizing partition distribution for: {partitions}")
+        df_batch = df_batch.repartition(*partitions)
+    
     writer = df_batch.write.mode(current_mode).option("path", "{dest_path}")
     if partitions:
         writer = writer.partitionBy(*partitions)
