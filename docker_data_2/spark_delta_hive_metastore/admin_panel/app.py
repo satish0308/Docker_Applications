@@ -14,6 +14,8 @@ import tempfile
 import psycopg2
 import pyarrow.parquet as pq
 import spark_tuning_manager
+import threading
+from datetime import datetime
 
 st.set_page_config(
     page_title="BDP Data Studio & Performance Engine",
@@ -28,6 +30,125 @@ try:
 except Exception as e:
     st.error(f"Failed to connect to Docker daemon: {e}")
     st.stop()
+
+# -------------------------------------------------------------
+# Persistent Ingestion Jobs Registry (Survives Hard Refresh)
+# -------------------------------------------------------------
+INGESTION_JOBS_FILE = "/app/ingestion_jobs.json"
+
+def load_ingestion_jobs():
+    """Loads persistent ingestion jobs registry from disk."""
+    if os.path.exists(INGESTION_JOBS_FILE):
+        try:
+            with open(INGESTION_JOBS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_ingestion_jobs(jobs):
+    """Saves persistent ingestion jobs registry to disk."""
+    try:
+        with open(INGESTION_JOBS_FILE, "w") as f:
+            json.dump(jobs, f, indent=2)
+    except Exception:
+        pass
+
+def update_job_record(job_id, **updates):
+    """Atomically updates fields of a specific job record."""
+    jobs = load_ingestion_jobs()
+    for j in jobs:
+        if j.get("job_id") == job_id:
+            j.update(updates)
+            break
+    save_ingestion_jobs(jobs)
+
+def run_ingestion_job_thread(job_id, spark_script, script_filename, chosen_ingest_params, dest_path, target_db, target_table, total_chunks, total_source_files, is_s3, selected_partitions):
+    """Background worker thread executing Spark ingestion with persistent progress streaming."""
+    try:
+        client_local = docker.from_env()
+        spark_cont = client_local.containers.get("spark")
+        copy_data_to_container(spark_cont, spark_script.encode('utf-8'), "/tmp", script_filename)
+        
+        tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_ingest_params)
+        
+        exec_stream = spark_cont.exec_run(
+            f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}",
+            stream=True
+        )
+        
+        full_output_lines = []
+        for stream_bytes in exec_stream.output:
+            chunk_str = stream_bytes.decode('utf-8', errors='ignore')
+            full_output_lines.append(chunk_str)
+            for line in chunk_str.splitlines():
+                if "--> 🚀 [Batch" in line:
+                    clean_msg = line.replace('--> ', '').strip()
+                    match = re.search(r'\[Batch (\d+)/(\d+)\]', line)
+                    curr_b = int(match.group(1)) if match else 1
+                    max_b = int(match.group(2)) if match else total_chunks
+                    update_job_record(
+                        job_id,
+                        current_chunk=curr_b,
+                        current_batch_msg=clean_msg,
+                        progress_pct=min(10 + int((curr_b / max_b) * 85), 95),
+                        last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        recent_logs="\n".join(full_output_lines[-40:])
+                    )
+                elif "--> ✅ [Batch" in line:
+                    clean_msg = line.replace('--> ', '').strip()
+                    update_job_record(
+                        job_id,
+                        last_committed_msg=clean_msg,
+                        last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        recent_logs="\n".join(full_output_lines[-40:])
+                    )
+
+        output = "".join(full_output_lines)
+        
+        if "__RESULT_SUCCESS__" in output:
+            row_count_res = "N/A"
+            time_taken_res = "N/A"
+            for line in output.splitlines():
+                if "__RESULT_SUCCESS__" in line:
+                    parts = line.split("|")
+                    if len(parts) >= 3:
+                        try:
+                            row_count_res = f"{int(parts[1]):,}"
+                        except Exception:
+                            row_count_res = parts[1]
+                        try:
+                            time_taken_res = f"{float(parts[2]):.2f}s"
+                        except Exception:
+                            time_taken_res = f"{parts[2]}s"
+            
+            update_job_record(
+                job_id,
+                status="SUCCESS",
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                total_rows=row_count_res,
+                elapsed_seconds=time_taken_res,
+                progress_pct=100,
+                recent_logs="\n".join(full_output_lines[-50:])
+            )
+        else:
+            err_snip = output[-2000:] if len(output) > 2000 else output
+            update_job_record(
+                job_id,
+                status="FAILED",
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                error_msg=err_snip,
+                progress_pct=100,
+                recent_logs="\n".join(full_output_lines[-50:])
+            )
+    except Exception as ex:
+        update_job_record(
+            job_id,
+            status="FAILED",
+            finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            error_msg=str(ex),
+            progress_pct=100
+        )
 
 # Helper Functions
 def copy_data_to_container(container, file_bytes, dest_dir, filename):
@@ -369,6 +490,60 @@ if menu == "📥 Data Ingestion & Partitioning":
         "detect schemas, **override data types**, **configure dynamic partition keys**, "
         "and register optimized **Parquet / Delta Lake tables** in **Hue & Hive Metastore**."
     )
+
+    # ---------------------------------------------------------
+    # Persistent Ingestion Status & Job Tracker (Survives Hard Refresh)
+    # ---------------------------------------------------------
+    all_persistent_jobs = load_ingestion_jobs()
+    active_jobs = [j for j in all_persistent_jobs if j.get("status") == "RUNNING"]
+    
+    if active_jobs:
+        curr_j = active_jobs[0]
+        st.info(f"🔄 **Active Background Ingestion in Progress: `{curr_j.get('target_db')}.{curr_j.get('target_table')}`**")
+        
+        col_act1, col_act2, col_act3 = st.columns([3, 1, 1])
+        with col_act1:
+            st.caption(f"⚙️ **Status**: {curr_j.get('current_batch_msg', 'Processing...')}")
+            st.progress(curr_j.get('progress_pct', 10))
+            if curr_j.get('last_committed_msg'):
+                st.caption(f"✅ {curr_j.get('last_committed_msg')}")
+        with col_act2:
+            st.metric("Micro-Batch Chunks", f"{curr_j.get('current_chunk', 1)} / {curr_j.get('total_chunks', 1)}")
+        with col_act3:
+            st.caption(f"⏱️ Started: `{curr_j.get('started_at')}`")
+            if st.button("🔄 Refresh Live Status", key="btn_refresh_active_job", use_container_width=True):
+                st.rerun()
+
+        with st.expander("📜 Live Background Logs (Tail 40 lines)", expanded=False):
+            st.code(curr_j.get("recent_logs", "Awaiting cluster output..."), language="text")
+
+        st.markdown("---")
+
+    elif all_persistent_jobs and all_persistent_jobs[0].get("status") == "SUCCESS":
+        last_succ = all_persistent_jobs[0]
+        with st.expander(f"🎉 Latest Successful Ingestion: `{last_succ.get('target_db')}.{last_succ.get('target_table')}`", expanded=False):
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            col_s1.metric("Rows Ingested", f"{last_succ.get('total_rows', 'N/A')}")
+            col_s2.metric("Processing Time", f"{last_succ.get('elapsed_seconds', 'N/A')}")
+            col_s3.metric("Total Chunks", f"{last_succ.get('total_chunks', 1)} Chunks ({last_succ.get('total_source_files', 1)} files)")
+            col_s4.metric("Storage", "MinIO S3 Delta" if last_succ.get("is_s3") else "HDFS")
+            st.link_button("🎨 Query Table in Hue", "http://localhost:8888")
+
+    if all_persistent_jobs:
+        with st.expander("📜 Persistent Ingestion Job Registry & Audit History", expanded=False):
+            history_rows = []
+            for j in all_persistent_jobs[:15]:
+                status_icon = "🟢 SUCCESS" if j.get("status") == "SUCCESS" else ("🔴 FAILED" if j.get("status") == "FAILED" else "🟡 RUNNING")
+                history_rows.append({
+                    "Started At": j.get("started_at"),
+                    "Target Table": f"{j.get('target_db')}.{j.get('target_table')}",
+                    "Status": status_icon,
+                    "Rows Ingested": j.get("total_rows", "N/A"),
+                    "Duration": j.get("elapsed_seconds", "N/A"),
+                    "Chunks": f"{j.get('total_chunks', 1)} Chunks ({j.get('total_source_files', 1)} files)",
+                    "Storage": "MinIO S3" if j.get("is_s3") else "HDFS"
+                })
+            st.dataframe(pd.DataFrame(history_rows), use_container_width=True)
 
     source_type = st.radio(
         "Select Data Source Mode:",
@@ -870,92 +1045,53 @@ spark.stop()
             CHUNK_SIZE = 100
             total_source_files = len(staged_source_paths)
             total_chunks = (total_source_files + CHUNK_SIZE - 1) // CHUNK_SIZE if total_source_files > 0 else 1
-            
-            chunk_plan_box = st.info(
-                f"📦 **Chunked Processing Plan**: Found **{total_source_files:,} source files** ➔ "
-                f"Divided into **{total_chunks} micro-batch chunk(s)** (~100 files per chunk) for zero-OOM memory safety."
-            )
 
-            status_text.info(f"⏳ Step 3/4: Launching distributed Spark cluster ({total_chunks} chunks)...")
-            progress_bar.progress(50)
-
-            # Copy script into spark container via Python Docker SDK
-            spark_cont = client.containers.get("spark")
+            job_id = f"job_{target_table}_{int(time.time())}"
             script_filename = f"ingest_{target_table}.py"
-            copy_data_to_container(spark_cont, spark_script.encode('utf-8'), "/tmp", script_filename)
 
-            tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_ingest_params)
+            new_job_record = {
+                "job_id": job_id,
+                "target_db": target_db,
+                "target_table": target_table,
+                "dest_path": dest_path,
+                "is_s3": is_s3,
+                "storage_format": output_format,
+                "status": "RUNNING",
+                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": None,
+                "total_chunks": total_chunks,
+                "current_chunk": 1,
+                "current_batch_msg": f"Starting Spark cluster for {total_chunks} micro-batches ({total_source_files} files)...",
+                "last_committed_msg": None,
+                "total_source_files": total_source_files,
+                "total_rows": "0",
+                "elapsed_seconds": "0s",
+                "progress_pct": 10,
+                "selected_partitions": selected_partitions,
+                "recent_logs": "Initializing Spark cluster session..."
+            }
             
-            # Execute with live streaming output
-            exec_stream = spark_cont.exec_run(
-                f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}",
-                stream=True
-            )
-            
-            full_output_chunks = []
-            for stream_bytes in exec_stream.output:
-                chunk_str = stream_bytes.decode('utf-8', errors='ignore')
-                full_output_chunks.append(chunk_str)
-                for line in chunk_str.splitlines():
-                    if "--> 🚀 [Batch" in line:
-                        clean_msg = line.replace('--> ', '').strip()
-                        status_text.info(f"⚙️ **Processing**: `{clean_msg}`")
-                        # Extract batch number to update progress bar smoothly
-                        match = re.search(r'\[Batch (\d+)/(\d+)\]', line)
-                        if match:
-                            curr_b, max_b = int(match.group(1)), int(match.group(2))
-                            progress_bar.progress(min(50 + int((curr_b / max_b) * 45), 95))
-                    elif "--> ✅ [Batch" in line:
-                        clean_msg = line.replace('--> ', '').strip()
-                        status_text.success(f"✅ **Committed**: `{clean_msg}`")
-            
-            output = "".join(full_output_chunks)
+            jobs = load_ingestion_jobs()
+            jobs.insert(0, new_job_record)
+            save_ingestion_jobs(jobs)
 
-            # Check for errors in output if exit was non-zero
-            if "Traceback" in output or "AnalysisException" in output or "Exception" in output and "__RESULT_SUCCESS__" not in output:
-                if "__RESULT_SUCCESS__" not in output:
-                    raise Exception(f"Spark Ingestion encounter an error:\n{output[-2000:]}")
+            # Start asynchronous background thread (survives browser refresh)
+            threading.Thread(
+                target=run_ingestion_job_thread,
+                args=(
+                    job_id, spark_script, script_filename, chosen_ingest_params,
+                    dest_path, target_db, target_table, total_chunks,
+                    total_source_files, is_s3, selected_partitions
+                ),
+                daemon=True
+            ).start()
 
-            # Parse execution results
-            row_count_res = "N/A"
-            time_taken_res = "N/A"
-            for line in output.splitlines():
-                if "__RESULT_SUCCESS__" in line:
-                    parts = line.split("|")
-                    if len(parts) >= 3:
-                        row_count_res = f"{int(parts[1]):,}"
-                        time_taken_res = f"{parts[2]}s"
-
-            progress_bar.progress(100)
-            status_text.empty()
-            chunk_plan_box.empty()
-
-            st.success(f"🎉 Table `{target_db}.{target_table}` created and registered successfully!")
-
-            col_res1, col_res2, col_res3, col_res4 = st.columns(4)
-            col_res1.metric("Rows Ingested", row_count_res)
-            col_res2.metric("Processing Time", time_taken_res)
-            col_res3.metric("Total Chunks", f"{total_chunks} ({total_source_files} files)")
-            col_res4.metric("Storage", "MinIO S3 Delta" if is_s3 else "HDFS")
-
-            if selected_partitions:
-                st.info(f"📁 **Partitioned by:** `{', '.join(selected_partitions)}` (Partition pruning enabled in Hue!)")
-
-            st.subheader("🔍 Query in Hue")
-            st.markdown(f"Your table is ready to query in **Hue (`http://localhost:8888`)**:")
-            sample_query = f"SELECT * FROM {target_db}.{target_table} LIMIT 10;"
-            st.code(sample_query, language="sql")
-
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                st.link_button("🎨 Open in Hue Query Editor", "http://localhost:8888")
-            with col_btn2:
-                st.link_button("🪣 View Files in MinIO S3", "http://localhost:9001")
+            st.success(f"🚀 Ingestion job `{job_id}` successfully launched in background!")
+            time.sleep(0.5)
+            st.rerun()
 
         except Exception as ex:
-            progress_bar.progress(100)
-            status_text.empty()
-            st.error(f"❌ Ingestion Error: {ex}")
+            st.error(f"❌ Failed to launch ingestion: {ex}")
 
 # -------------------------------------------------------------
 # TAB: SPARK TUNING & CLUSTER SCALING
