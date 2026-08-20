@@ -160,12 +160,12 @@ def _livy_auto_cleaner_worker():
                 for s in data.get("sessions", []):
                     sid = s["id"]
                     state = s.get("state")
-                    if state in ["idle", "dead", "error", "killed", "shutting_down"]:
+                    if state in ["dead", "error", "killed", "shutting_down"]:
                         del_req = urllib.request.Request(f"http://livy:8998/sessions/{sid}", method="DELETE")
                         urllib.request.urlopen(del_req, timeout=3)
         except Exception:
             pass
-        time.sleep(45)
+        time.sleep(60)
 
 # Start background Livy session auto-pruner once
 if "livy_auto_pruner_active" not in st.session_state:

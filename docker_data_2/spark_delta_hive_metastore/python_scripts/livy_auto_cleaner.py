@@ -54,10 +54,6 @@ def prune_idle_sessions(max_idle_seconds=120):
         if state in ["dead", "error", "killed", "shutting_down"]:
             if delete_livy_session(sid):
                 pruned.append((sid, state))
-        # Idle sessions holding executors
-        elif state == "idle":
-            if delete_livy_session(sid):
-                pruned.append((sid, "idle_pruned"))
                 
     return pruned
 
