@@ -17,6 +17,8 @@ downloads_binaries/
 *.jar
 
 # Data Files
+data/
+data/*
 *.csv
 *.parquet
 *.orc
