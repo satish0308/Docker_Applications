@@ -8,7 +8,7 @@
     "shuffle_partitions": 200,
     "aqe_enabled": true,
     "aqe_coalesce": true,
-    "memory_fraction": 0.65,
+    "memory_fraction": 0.8,
     "storage_fraction": 0.5,
     "offheap_enabled": true,
     "offheap_size": "1g",
