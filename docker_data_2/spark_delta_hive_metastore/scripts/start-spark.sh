@@ -32,6 +32,16 @@ if [ "$SPARK_MODE" == "worker" ]; then
         $SPARK_MASTER_URL
 fi
 
+# Start Spark Thrift Server (Shared SQL / BI Server)
+if [ "$SPARK_MODE" == "thriftserver" ]; then
+    echo "Starting Spark Thrift Server on port 10000 connected to $SPARK_MASTER_URL..."
+    exec $SPARK_HOME/bin/spark-class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 \
+        --master "$SPARK_MASTER_URL" \
+        --name "Shared-Spark-ThriftServer" \
+        --hiveconf hive.server2.thrift.port=10000 \
+        --hiveconf hive.server2.thrift.bind.host=0.0.0.0
+fi
+
 # If unrecognized mode
-echo "ERROR: Unknown SPARK_MODE $SPARK_MODE. Use 'master' or 'worker'."
+echo "ERROR: Unknown SPARK_MODE $SPARK_MODE. Use 'master', 'worker', or 'thriftserver'."
 exit 1

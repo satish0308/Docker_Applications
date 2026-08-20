@@ -150,6 +150,29 @@ def run_ingestion_job_thread(job_id, spark_script, script_filename, chosen_inges
             progress_pct=100
         )
 
+def _livy_auto_cleaner_worker():
+    """Background daemon periodically pruning idle or dead Livy sessions to protect cluster memory."""
+    while True:
+        try:
+            req = urllib.request.Request("http://livy:8998/sessions", headers={"User-Agent": "LivyAutoPruner/1.0"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                for s in data.get("sessions", []):
+                    sid = s["id"]
+                    state = s.get("state")
+                    if state in ["idle", "dead", "error", "killed", "shutting_down"]:
+                        del_req = urllib.request.Request(f"http://livy:8998/sessions/{sid}", method="DELETE")
+                        urllib.request.urlopen(del_req, timeout=3)
+        except Exception:
+            pass
+        time.sleep(45)
+
+# Start background Livy session auto-pruner once
+if "livy_auto_pruner_active" not in st.session_state:
+    st.session_state["livy_auto_pruner_active"] = True
+    t_cleaner = threading.Thread(target=_livy_auto_cleaner_worker, daemon=True)
+    t_cleaner.start()
+
 # Helper Functions
 def copy_data_to_container(container, file_bytes, dest_dir, filename):
     """Copies in-memory bytes directly to any container path using Docker API."""

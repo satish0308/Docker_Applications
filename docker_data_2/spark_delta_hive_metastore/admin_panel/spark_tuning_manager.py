@@ -298,6 +298,10 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
                 mode = parts[2] if len(parts) > 2 else "rw"
                 vol_map[host_p] = {"bind": cont_p, "mode": mode}
 
+        # Always ensure /data is mounted into every spark-worker container
+        host_data_dir = "/home/satish/Docker_Applications/docker_data_2/spark_delta_hive_metastore/data"
+        vol_map[host_data_dir] = {"bind": "/data", "mode": "rw"}
+
         # Check if existing workers need re-provisioning due to RAM or Core change
         running_workers = [c for c in all_workers if c.status == "running"]
         current_count = len(running_workers)
@@ -327,27 +331,29 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
             w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
             try:
                 c = client.containers.get(w_name)
-                if c.status != "running":
-                    c.start()
-                    added += 1
-            except docker.errors.NotFound:
-                client.containers.run(
-                    image=image_name,
-                    name=w_name,
-                    detach=True,
-                    environment=target_env,
-                    network=network_name,
-                    volumes=vol_map,
-                    entrypoint=entrypoint
-                )
-                added += 1
+                c_env = c.attrs['Config']['Env'] or []
+                if c.status == "running" and f"SPARK_WORKER_MEMORY={worker_memory}" in c_env and f"SPARK_WORKER_CORES={worker_cores}" in c_env:
+                    continue
+                c.remove(force=True)
+            except Exception:
+                pass
 
-        # Stop any excess workers beyond target_count
+            client.containers.run(
+                image=image_name,
+                name=w_name,
+                detach=True,
+                environment=target_env,
+                network=network_name,
+                volumes=vol_map,
+                entrypoint=entrypoint
+            )
+            added += 1
+
+        # Stop and remove any excess workers beyond target_count
         for i in range(target_count + 1, target_count + 20):
             w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
             try:
                 c = client.containers.get(w_name)
-                c.stop(timeout=3)
                 c.remove(force=True)
             except Exception:
                 pass

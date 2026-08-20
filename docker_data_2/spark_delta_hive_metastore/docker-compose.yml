@@ -188,6 +188,30 @@ services:
     networks:
       - hadoop-network
 
+  spark-thriftserver:
+    build:
+      context: .
+      dockerfile: spark.Dockerfile
+    container_name: spark-thriftserver
+    restart: unless-stopped
+    volumes:
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./scripts/start-spark.sh:/home/sparkuser/start-spark2.sh
+      - ./data:/data
+    environment:
+      - SPARK_MODE=thriftserver
+      - SPARK_MASTER_URL=spark://spark:7077
+    ports:
+      - "10000:10000"
+    depends_on:
+      - spark
+      - postgres
+      - namenode
+    networks:
+      - hadoop-network
+
   resourcemanager:
     build:
       context: .
