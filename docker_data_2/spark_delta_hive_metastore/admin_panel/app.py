@@ -860,7 +860,6 @@ print(f"\\n🏆 Ingestion Complete: {{total_rows_ingested:,}} total rows across 
 print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
 spark.stop()
 """
-"""
 
             status_text.info("⏳ Step 3/4: Executing distributed Spark ingestion & Metastore registration...")
             progress_bar.progress(70)
