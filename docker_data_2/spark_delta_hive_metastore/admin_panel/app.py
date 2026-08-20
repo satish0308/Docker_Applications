@@ -838,7 +838,7 @@ for batch_idx in range(total_batches):
     # 3. Dynamic Partitioning & Table Save (First batch respects save_mode, subsequent append)
     current_mode = "{save_mode}" if batch_idx == 0 else "append"
     if partitions:
-        print(f"--> Optimizing partition distribution for: {partitions}")
+        print(f"--> Optimizing partition distribution for: {{partitions}}")
         df_batch = df_batch.repartition(*partitions)
     
     writer = df_batch.write.mode(current_mode).option("path", "{dest_path}")
