@@ -15,6 +15,7 @@ import psycopg2
 import pyarrow.parquet as pq
 import spark_tuning_manager
 import threading
+import uuid
 from datetime import datetime
 
 st.set_page_config(
@@ -148,6 +149,170 @@ def run_ingestion_job_thread(job_id, spark_script, script_filename, chosen_inges
             finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             error_msg=str(ex),
             progress_pct=100
+        )
+
+# -------------------------------------------------------------
+# Persistent SQL Query Jobs Registry (Survives Hard Refresh)
+# -------------------------------------------------------------
+SQL_QUERY_JOBS_FILE = "/app/sql_query_jobs.json"
+QUERY_RESULTS_DIR = "/app/query_results"
+
+def load_sql_query_jobs():
+    """Loads persistent SQL query jobs registry from disk."""
+    if os.path.exists(SQL_QUERY_JOBS_FILE):
+        try:
+            with open(SQL_QUERY_JOBS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_sql_query_jobs(jobs):
+    """Saves persistent SQL query jobs registry to disk."""
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(SQL_QUERY_JOBS_FILE)), exist_ok=True)
+        with open(SQL_QUERY_JOBS_FILE, "w") as f:
+            json.dump(jobs, f, indent=2)
+    except Exception:
+        pass
+
+def update_sql_query_record(query_id, **updates):
+    """Atomically updates fields of a specific SQL query job record."""
+    jobs = load_sql_query_jobs()
+    for j in jobs:
+        if j.get("query_id") == query_id:
+            j.update(updates)
+            break
+    save_sql_query_jobs(jobs)
+
+def run_async_sql_query_thread(query_id, sql_query, tuning_profile_name, chosen_tuning_params, max_rows=1000):
+    """Background worker thread executing Spark SQL query asynchronously with persistent result caching."""
+    try:
+        os.makedirs(QUERY_RESULTS_DIR, exist_ok=True)
+        client_local = docker.from_env()
+        spark_cont = client_local.containers.get("spark")
+        
+        # Escape triple quotes in SQL query
+        escaped_sql = sql_query.replace('"""', '\\"\\"\\"')
+        
+        script_content = f'''import json
+import time
+import os
+from pyspark.sql import SparkSession
+
+start_t = time.time()
+spark = SparkSession.builder \\
+    .appName("PersistentSQL_{query_id}") \\
+    .enableHiveSupport() \\
+    .getOrCreate()
+
+result_payload = {{"status": "pending", "query_id": "{query_id}"}}
+
+try:
+    print("--> 🚀 [Spark Engine] Executing SQL Query across cluster...")
+    df = spark.sql("""{escaped_sql}""")
+    
+    schema_info = [{{"name": f.name, "type": str(f.dataType)}} for f in df.schema.fields]
+    row_count = df.count()
+    limited_df = df.limit({max_rows})
+    
+    records_json = limited_df.toJSON().collect()
+    records = [json.loads(r) for r in records_json]
+    
+    elapsed = time.time() - start_t
+    print(f"--> ✅ [Spark Engine] Query completed! Total Rows: {{row_count}}, Returned: {{len(records)}}, Time: {{elapsed:.2f}}s")
+    
+    result_payload = {{
+        "status": "success",
+        "query_id": "{query_id}",
+        "sql_query": """{escaped_sql}""",
+        "total_rows": row_count,
+        "returned_rows": len(records),
+        "elapsed_sec": round(elapsed, 2),
+        "schema": schema_info,
+        "records": records
+    }}
+except Exception as e:
+    elapsed = time.time() - start_t
+    print(f"--> ❌ [Spark Engine] Query Error: {{str(e)}}")
+    result_payload = {{
+        "status": "error",
+        "query_id": "{query_id}",
+        "error": str(e),
+        "elapsed_sec": round(elapsed, 2)
+    }}
+finally:
+    spark.stop()
+
+with open("/tmp/result_{query_id}.json", "w") as f:
+    json.dump(result_payload, f)
+'''
+        script_filename = f"sql_run_{query_id}.py"
+        copy_data_to_container(spark_cont, script_content.encode('utf-8'), "/tmp", script_filename)
+        
+        tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_tuning_params)
+        
+        exec_stream = spark_cont.exec_run(
+            f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}",
+            stream=True
+        )
+        
+        full_output_lines = []
+        for stream_bytes in exec_stream.output:
+            chunk_str = stream_bytes.decode('utf-8', errors='ignore')
+            full_output_lines.append(chunk_str)
+            
+        full_log_text = "".join(full_output_lines)
+        
+        # Read back result JSON from container
+        result_file_host = os.path.join(QUERY_RESULTS_DIR, f"{query_id}.json")
+        try:
+            bits, stat = spark_cont.get_archive(f"/tmp/result_{query_id}.json")
+            tar_bytes = b"".join(bits)
+            tar = tarfile.open(fileobj=io.BytesIO(tar_bytes))
+            f_member = tar.extractfile(tar.getmembers()[0])
+            result_json_str = f_member.read().decode('utf-8')
+            res_dict = json.loads(result_json_str)
+            
+            with open(result_file_host, "w") as f:
+                f.write(result_json_str)
+                
+            if res_dict.get("status") == "success":
+                update_sql_query_record(
+                    query_id,
+                    status="SUCCESS",
+                    finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    total_rows=f"{res_dict.get('total_rows', 0):,}",
+                    elapsed_seconds=f"{res_dict.get('elapsed_sec', 0)}s",
+                    result_file=result_file_host,
+                    recent_logs=full_log_text[-3000:]
+                )
+            else:
+                update_sql_query_record(
+                    query_id,
+                    status="FAILED",
+                    finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    error_msg=res_dict.get("error", "Unknown error"),
+                    elapsed_seconds=f"{res_dict.get('elapsed_sec', 0)}s",
+                    recent_logs=full_log_text[-3000:]
+                )
+        except Exception as e_res:
+            update_sql_query_record(
+                query_id,
+                status="FAILED",
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                error_msg=f"Could not retrieve result file: {e_res}",
+                recent_logs=full_log_text[-3000:]
+            )
+            
+        spark_cont.exec_run(f"rm -f /tmp/{script_filename} /tmp/result_{query_id}.json")
+        
+    except Exception as ex:
+        update_sql_query_record(
+            query_id,
+            status="FAILED",
+            finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            error_msg=str(ex)
         )
 
 def _livy_auto_cleaner_worker():
@@ -483,6 +648,7 @@ menu = st.sidebar.radio(
     "Navigation Menu",
     [
         "📥 Data Ingestion & Partitioning",
+        "⚡ Persistent SQL Studio & Tracer",
         "⚡ Spark Tuning & Cluster Scaling",
         "📦 Table Backup & Restore",
         "⏳ Delta Time-Travel & Maintenance",
@@ -1121,6 +1287,238 @@ spark.stop()
 
         except Exception as ex:
             st.error(f"❌ Failed to launch ingestion: {ex}")
+
+# -------------------------------------------------------------
+# TAB: PERSISTENT SQL STUDIO & EXECUTION TRACER
+# -------------------------------------------------------------
+elif menu == "⚡ Persistent SQL Studio & Tracer":
+    st.header("⚡ Persistent Spark SQL Studio & Live Execution Tracer")
+    st.markdown(
+        "Execute massive analytical queries asynchronously across the Spark cluster with **zero result loss**. "
+        "Queries run decoupled in the background and **survive browser hard-refreshes (`Ctrl+F5`), disconnects, and tab closures**."
+    )
+
+    all_sql_jobs = load_sql_query_jobs()
+    running_sql_jobs = [j for j in all_sql_jobs if j.get("status") == "RUNNING"]
+
+    # 1. LIVE RUNNING QUERIES BANNER
+    if running_sql_jobs:
+        st.subheader("🏃‍♂️ Live Active Queries Running in Spark Cluster")
+        for r_job in running_sql_jobs:
+            q_id = r_job.get("query_id")
+            q_sql = r_job.get("sql_query", "")
+            q_start = r_job.get("submitted_at", "")
+            q_prof = r_job.get("tuning_profile", "Medium")
+            
+            with st.container():
+                st.markdown(f"""
+                <div style="background-color: #1E293B; border-left: 5px solid #3B82F6; padding: 15px; border-radius: 8px; margin-bottom: 12px;">
+                    <div style="font-size: 16px; font-weight: bold; color: #60A5FA;">⚡ Query ID: <code>{q_id}</code> &nbsp;|&nbsp; Profile: <b>{q_prof}</b></div>
+                    <div style="font-size: 13px; color: #94A3B8; margin-top: 4px;">Submitted at: {q_start} &nbsp;●&nbsp; Status: <span style="color: #F59E0B; font-weight: bold;">RUNNING</span></div>
+                    <div style="font-family: monospace; font-size: 12px; background-color: #0F172A; padding: 8px; border-radius: 4px; margin-top: 8px; color: #E2E8F0; max-height: 80px; overflow-y: auto;">
+                        {q_sql}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col_c1, col_c2 = st.columns([1, 4])
+                with col_c1:
+                    if st.button("🔄 Check / Refresh Status", key=f"ref_{q_id}"):
+                        st.rerun()
+                with col_c2:
+                    with st.expander("📜 Live Execution Logs", expanded=False):
+                        st.code(r_job.get("recent_logs", "Processing in Spark DAG Scheduler..."), language="bash")
+        st.markdown("---")
+
+    # 2. QUERY SUBMISSION STUDIO
+    st.subheader("📝 Compose & Launch Persistent Query")
+    
+    # Pre-canned Quick Templates
+    col_t1, col_t2, col_t3 = st.columns(3)
+    with col_t1:
+        if st.button("📋 Template: Join ItemMaster & Inventory", use_container_width=True):
+            st.session_state["sql_editor_val"] = (
+                "SELECT t1.variantmaterialcode, t1.producttypedescen, t1.familydescen, t2.itemid, t2.stockuds, t2.stockcost\n"
+                "FROM default.itemmaster t1\n"
+                "JOIN default.df_inv_2 t2 ON t1.variantmaterialcode = t2.itemid\n"
+                "LIMIT 50;"
+            )
+    with col_t2:
+        if st.button("📊 Template: Inventory Valuation by Season", use_container_width=True):
+            st.session_state["sql_editor_val"] = (
+                "SELECT season, COUNT(*) as total_records, SUM(stockuds) as total_units, ROUND(SUM(stockuds * stockcost), 2) as total_valuation\n"
+                "FROM default.df_inv_2\n"
+                "GROUP BY season\n"
+                "ORDER BY total_valuation DESC\n"
+                "LIMIT 25;"
+            )
+    with col_t3:
+        if st.button("🔍 Template: List All Hive Tables", use_container_width=True):
+            st.session_state["sql_editor_val"] = "SHOW TABLES IN default;"
+
+    default_sql = st.session_state.get(
+        "sql_editor_val",
+        "SELECT t1.variantmaterialcode, t1.producttypedescen, t2.itemid, t2.stockuds, t2.stockcost\nFROM default.itemmaster t1\nJOIN default.df_inv_2 t2 ON t1.variantmaterialcode = t2.itemid\nLIMIT 25;"
+    )
+
+    sql_input_text = st.text_area(
+        "SQL Statement:",
+        value=default_sql,
+        height=140,
+        help="Write standard Spark SQL / HiveQL query. Queries execute decoupled in a background worker thread."
+    )
+
+    col_q1, col_q2, col_q3 = st.columns(3)
+    with col_q1:
+        prof_keys = list(spark_tuning_manager.PROFILES.keys())
+        sel_q_profile = st.selectbox(
+            "Compute Resource Profile:",
+            prof_keys,
+            index=1,
+            help="Select resource allocation. Heavy profile allocates 8GB RAM & 4 Cores per worker for large table joins."
+        )
+    with col_q2:
+        sel_max_rows = st.number_input("Max Result Rows to Cache:", min_value=10, max_value=10000, value=500, step=100)
+    with col_q3:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        btn_launch_query = st.button("🚀 Launch Persistent Async Query", type="primary", use_container_width=True)
+
+    if btn_launch_query:
+        if not sql_input_text.strip():
+            st.error("Please provide a valid SQL statement.")
+        else:
+            try:
+                new_q_id = f"query_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                chosen_params = spark_tuning_manager.PROFILES[sel_q_profile]
+                
+                new_sql_record = {
+                    "query_id": new_q_id,
+                    "sql_query": sql_input_text.strip(),
+                    "tuning_profile": sel_q_profile,
+                    "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "finished_at": "In Progress...",
+                    "status": "RUNNING",
+                    "total_rows": "Calculating...",
+                    "elapsed_seconds": "0s",
+                    "result_file": "",
+                    "recent_logs": "Initializing Spark cluster session..."
+                }
+                
+                jobs = load_sql_query_jobs()
+                jobs.insert(0, new_sql_record)
+                save_sql_query_jobs(jobs)
+
+                # Launch async background thread
+                threading.Thread(
+                    target=run_async_sql_query_thread,
+                    args=(new_q_id, sql_input_text.strip(), sel_q_profile, chosen_params, sel_max_rows),
+                    daemon=True
+                ).start()
+
+                st.success(f"🎉 Query `{new_q_id}` launched in background! You can safely refresh the page; the query will keep running.")
+                time.sleep(0.5)
+                st.rerun()
+            except Exception as e_launch:
+                st.error(f"Failed to launch query: {e_launch}")
+
+    st.markdown("---")
+
+    # 3. PERSISTENT QUERY HISTORY & RESULTS BROWSER
+    st.subheader("📚 Persistent Query History & Results Browser")
+    st.caption("All queries survive browser hard-refreshes. Click on any query to view full interactive results, export to CSV, or inspect execution diagnostics.")
+
+    if all_sql_jobs:
+        col_hist_ctrl1, col_hist_ctrl2 = st.columns([3, 1])
+        with col_hist_ctrl1:
+            status_filter = st.selectbox("Filter History by Status:", ["All Queries", "🟢 SUCCESS", "🏃‍♂️ RUNNING", "🔴 FAILED"])
+        with col_hist_ctrl2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            if st.button("🧹 Clear All Finished Queries", use_container_width=True):
+                keep_jobs = [j for j in all_sql_jobs if j.get("status") == "RUNNING"]
+                save_sql_query_jobs(keep_jobs)
+                st.success("Cleaned up finished query history.")
+                time.sleep(0.5)
+                st.rerun()
+
+        filtered_jobs = all_sql_jobs
+        if status_filter == "🟢 SUCCESS":
+            filtered_jobs = [j for j in all_sql_jobs if j.get("status") == "SUCCESS"]
+        elif status_filter == "🏃‍♂️ RUNNING":
+            filtered_jobs = [j for j in all_sql_jobs if j.get("status") == "RUNNING"]
+        elif status_filter == "🔴 FAILED":
+            filtered_jobs = [j for j in all_sql_jobs if j.get("status") == "FAILED"]
+
+        for job in filtered_jobs:
+            j_id = job.get("query_id")
+            j_status = job.get("status", "UNKNOWN")
+            j_sql = job.get("sql_query", "")
+            j_time = job.get("elapsed_seconds", "-")
+            j_rows = job.get("total_rows", "-")
+            j_finished = job.get("finished_at", "-")
+            j_res_file = job.get("result_file", "")
+            j_err = job.get("error_msg", "")
+            j_profile = job.get("tuning_profile", "Medium")
+
+            badge = "🟢 SUCCESS" if j_status == "SUCCESS" else ("🏃‍♂️ RUNNING" if j_status == "RUNNING" else "🔴 FAILED")
+
+            with st.expander(f"{badge} | `{j_id}` | Rows: **{j_rows}** | Time: **{j_time}** | Finished: {j_finished}", expanded=(j_status == "RUNNING")):
+                st.code(j_sql, language="sql")
+                
+                col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+                col_k1.metric("Status", j_status)
+                col_k2.metric("Total Rows", str(j_rows))
+                col_k3.metric("Elapsed Time", str(j_time))
+                col_k4.metric("Resource Profile", j_profile.split(" ")[0])
+
+                if j_status == "SUCCESS" and j_res_file and os.path.exists(j_res_file):
+                    try:
+                        with open(j_res_file, "r") as rf:
+                            res_payload = json.load(rf)
+                            records = res_payload.get("records", [])
+                            schema = res_payload.get("schema", [])
+                            
+                            if records:
+                                df_res = pd.DataFrame(records)
+                                st.markdown("#### 📊 Interactive Query Results Table")
+                                st.dataframe(df_res, use_container_width=True)
+                                
+                                col_d1, col_d2 = st.columns(2)
+                                with col_d1:
+                                    csv_data = df_res.to_csv(index=False).encode('utf-8')
+                                    st.download_button(
+                                        label="📥 Download Result as CSV",
+                                        data=csv_data,
+                                        file_name=f"result_{j_id}.csv",
+                                        mime="text/csv",
+                                        key=f"dl_csv_{j_id}"
+                                    )
+                                with col_d2:
+                                    st.download_button(
+                                        label="📥 Download Result as JSON",
+                                        data=json.dumps(res_payload, indent=2),
+                                        file_name=f"result_{j_id}.json",
+                                        mime="application/json",
+                                        key=f"dl_json_{j_id}"
+                                    )
+                            else:
+                                st.info("Query executed successfully but returned 0 rows.")
+
+                            if schema:
+                                with st.expander("📐 Result Schema & Column Data Types", expanded=False):
+                                    st.dataframe(pd.DataFrame(schema), use_container_width=True, hide_index=True)
+                    except Exception as e_read:
+                        st.error(f"Error loading result cache: {e_read}")
+
+                elif j_status == "FAILED":
+                    st.error(f"❌ **Execution Error**: {j_err}")
+                    with st.expander("📜 Full Error Logs", expanded=False):
+                        st.code(job.get("recent_logs", "No logs available."), language="bash")
+                
+                elif j_status == "RUNNING":
+                    st.info("Query is currently executing across Spark worker executors. Click 'Refresh Status' above or hard-refresh the page to update.")
+
+    else:
+        st.info("No queries have been executed yet. Use the Query Studio above to launch your first persistent Spark SQL query!")
 
 # -------------------------------------------------------------
 # TAB: SPARK TUNING & CLUSTER SCALING
@@ -1887,9 +2285,9 @@ elif menu == "🗄️ Metastore Table Explorer":
                     value=f"SELECT * FROM {selected_tbl} LIMIT 25;",
                     height=100
                 )
-                col_run1, col_run2 = st.columns([1, 3])
+                col_run1, col_run2, col_run3 = st.columns([1.2, 1.5, 1.5])
                 with col_run1:
-                    if st.button("▶️ Execute Query", type="primary", key=f"run_sql_{selected_tbl}"):
+                    if st.button("▶️ Inline Run", key=f"run_sql_{selected_tbl}"):
                         with st.spinner("Executing query in SparkSQL engine..."):
                             custom_res = fetch_table_inspector_data(selected_tbl, custom_sql=custom_sql_input)
                             if custom_res.get("status") == "success":
@@ -1903,6 +2301,36 @@ elif menu == "🗄️ Metastore Table Explorer":
                             else:
                                 st.error(f"SQL Execution Error: {custom_res.get('error')}")
                 with col_run2:
+                    if st.button("🚀 Persistent Async Run (Survives Refresh)", type="primary", key=f"async_sql_{selected_tbl}"):
+                        try:
+                            new_q_id = f"query_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                            chosen_params = spark_tuning_manager.PROFILES["🟡 Medium (Standard ETL / Daily Batches)"]
+                            new_sql_record = {
+                                "query_id": new_q_id,
+                                "sql_query": custom_sql_input.strip(),
+                                "tuning_profile": "🟡 Medium (Standard ETL / Daily Batches)",
+                                "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "finished_at": "In Progress...",
+                                "status": "RUNNING",
+                                "total_rows": "Calculating...",
+                                "elapsed_seconds": "0s",
+                                "result_file": "",
+                                "recent_logs": "Initializing Spark cluster session..."
+                            }
+                            jobs = load_sql_query_jobs()
+                            jobs.insert(0, new_sql_record)
+                            save_sql_query_jobs(jobs)
+                            threading.Thread(
+                                target=run_async_sql_query_thread,
+                                args=(new_q_id, custom_sql_input.strip(), "Medium", chosen_params, 500),
+                                daemon=True
+                            ).start()
+                            st.success(f"🚀 Persistent Query `{new_q_id}` launched! View live execution in '⚡ Persistent SQL Studio & Tracer' tab.")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e_launch:
+                            st.error(f"Failed to launch async query: {e_launch}")
+                with col_run3:
                     st.link_button("🎨 Open in Hue Query Editor", "http://localhost:8888")
     else:
         st.info("No tables currently registered in Hive Metastore.")
