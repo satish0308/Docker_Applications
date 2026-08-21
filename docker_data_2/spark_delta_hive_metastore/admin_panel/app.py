@@ -1620,29 +1620,36 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
 
         current_config = spark_tuning_manager.load_tuning_config()
         active_prof_name = current_config.get("active_profile", "🟡 Medium (Standard ETL / Daily Batches)")
-        active_params = current_config.get("params", spark_tuning_manager.PROFILES["🟡 Medium (Standard ETL / Daily Batches)"])
+        active_params = current_config.get("params", {})
+
+        profile_keys = list(spark_tuning_manager.PROFILES.keys()) + ["🛠️ Custom Engine Override"]
+        default_index = profile_keys.index(active_prof_name) if active_prof_name in profile_keys else 1
 
         selected_prof = st.selectbox(
             "Select Active Workload Profile:",
-            list(spark_tuning_manager.PROFILES.keys()) + ["🛠️ Custom Engine Override"],
-            index=list(spark_tuning_manager.PROFILES.keys()).index(active_prof_name) if active_prof_name in spark_tuning_manager.PROFILES else 1,
+            profile_keys,
+            index=default_index,
             key="tuning_prof_sel"
         )
 
         if selected_prof in spark_tuning_manager.PROFILES:
             prof_data = spark_tuning_manager.PROFILES[selected_prof]
             st.info(f"📋 **Description**: {prof_data['description']}")
-            drv_mem_val = prof_data["driver_memory"]
-            exe_mem_val = prof_data["executor_memory"]
-            exe_cores_val = prof_data["executor_cores"]
-            max_cores_val = prof_data["max_cores"]
-            shuf_parts_val = prof_data["shuffle_partitions"]
-            aqe_val = prof_data["aqe_enabled"]
-            aqe_coal_val = prof_data["aqe_coalesce"]
-            mem_frac_val = prof_data["memory_fraction"]
-            offheap_val = prof_data["offheap_enabled"]
-            offheap_sz_val = prof_data["offheap_size"]
-            kryo_val = prof_data["kryo_serializer"]
+            
+            # Prioritize saved customized values if this is the active saved profile
+            source_dict = active_params if (selected_prof == active_prof_name and active_params) else prof_data
+            
+            drv_mem_val = source_dict.get("driver_memory", prof_data["driver_memory"])
+            exe_mem_val = source_dict.get("executor_memory", prof_data["executor_memory"])
+            exe_cores_val = source_dict.get("executor_cores", prof_data["executor_cores"])
+            max_cores_val = source_dict.get("max_cores", prof_data["max_cores"])
+            shuf_parts_val = source_dict.get("shuffle_partitions", prof_data["shuffle_partitions"])
+            aqe_val = source_dict.get("aqe_enabled", prof_data["aqe_enabled"])
+            aqe_coal_val = source_dict.get("aqe_coalesce", prof_data["aqe_coalesce"])
+            mem_frac_val = source_dict.get("memory_fraction", prof_data["memory_fraction"])
+            offheap_val = source_dict.get("offheap_enabled", prof_data["offheap_enabled"])
+            offheap_sz_val = source_dict.get("offheap_size", prof_data["offheap_size"])
+            kryo_val = source_dict.get("kryo_serializer", prof_data["kryo_serializer"])
         else:
             st.info("🛠️ **Custom Mode**: Configure exact parameters according to your specific hardware and dataset constraints.")
             drv_mem_val = active_params.get("driver_memory", "3g")

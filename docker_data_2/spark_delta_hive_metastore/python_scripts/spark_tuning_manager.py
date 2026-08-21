@@ -101,8 +101,8 @@ PROFILES = {
 }
 
 def load_tuning_config():
-    """Loads active Spark tuning configuration or returns default medium profile."""
-    paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
+    """Loads active Spark tuning configuration from persistent JSON store."""
+    paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/spark_tuning_config.json", "admin_panel/spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
     for p in paths:
         if os.path.exists(p):
             try:
@@ -202,7 +202,7 @@ def update_livy_conf(params):
 
 def save_tuning_config(config_dict):
     """Saves active Spark tuning configuration, syncs spark-defaults.conf & livy.conf, and reloads Livy."""
-    paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
+    paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/spark_tuning_config.json", "admin_panel/spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
     for p in paths:
         try:
             os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
