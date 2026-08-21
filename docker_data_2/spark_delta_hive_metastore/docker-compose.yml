@@ -159,8 +159,6 @@ services:
       - namenode
       - datanode
     ports:
-      - "4040:4040"
-      - "4041:4041"
       - "18080:18080"
       - "5555:5555"
       - "8089:8080"
@@ -312,6 +310,7 @@ services:
       - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
     ports:
       - "8998:8998"
+      - "4040-4045:4040-4045"
     depends_on:
       - spark
     networks:
