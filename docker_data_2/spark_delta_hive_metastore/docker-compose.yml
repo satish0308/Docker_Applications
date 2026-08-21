@@ -127,6 +127,7 @@ services:
       - HUE_SECRET_KEY=secret
     volumes:
       - ./hue/hue.ini:/usr/share/hue/desktop/conf/hue.ini:ro
+      - ./hue/spark_shell.py:/usr/share/hue/desktop/libs/notebook/src/notebook/connectors/spark_shell.py:ro
     ports:
       - "8888:8888"
     depends_on:
