@@ -1567,17 +1567,19 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             )
             col_ns1, col_ns2 = st.columns(2)
             with col_ns1:
+                worker_ram_options = ["2g", "3g", "4g", "6g", "8g", "10g", "12g", "14g", "16g", "20g", "24g", "28g", "32g", "48g", "64g"]
                 sel_worker_ram = st.selectbox(
                     "RAM per Worker Node",
-                    ["4g", "8g", "16g", "32g"],
-                    index=1,
+                    worker_ram_options,
+                    index=worker_ram_options.index("8g") if "8g" in worker_ram_options else 4,
                     help="Hardware memory envelope allocated per worker daemon."
                 )
             with col_ns2:
+                worker_core_options = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
                 sel_worker_cores = st.selectbox(
                     "CPU Cores per Worker Node",
-                    [2, 4, 8, 16],
-                    index=1,
+                    worker_core_options,
+                    index=worker_core_options.index(4) if 4 in worker_core_options else 3,
                     help="CPU cores pool allocated per worker daemon."
                 )
 
@@ -1643,10 +1645,10 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             kryo_val = prof_data["kryo_serializer"]
         else:
             st.info("🛠️ **Custom Mode**: Configure exact parameters according to your specific hardware and dataset constraints.")
-            drv_mem_val = active_params.get("driver_memory", "2g")
-            exe_mem_val = active_params.get("executor_memory", "4g")
+            drv_mem_val = active_params.get("driver_memory", "3g")
+            exe_mem_val = active_params.get("executor_memory", "2g")
             exe_cores_val = active_params.get("executor_cores", 2)
-            max_cores_val = active_params.get("max_cores", 4)
+            max_cores_val = active_params.get("max_cores", 6)
             shuf_parts_val = active_params.get("shuffle_partitions", 64)
             aqe_val = active_params.get("aqe_enabled", True)
             aqe_coal_val = active_params.get("aqe_coalesce", True)
@@ -1658,15 +1660,17 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
         col_t1, col_t2 = st.columns(2)
         with col_t1:
             st.markdown("#### 🧠 JVM Memory Allocation")
+            drv_options = ["1g", "2g", "3g", "4g", "6g", "8g", "10g", "12g", "14g", "16g", "24g", "32g"]
             in_drv_mem = st.selectbox(
                 "Driver Memory (`spark.driver.memory`)",
-                ["1g", "2g", "4g", "8g", "16g", "32g"],
-                index=["1g", "2g", "4g", "8g", "16g", "32g"].index(drv_mem_val) if drv_mem_val in ["1g", "2g", "4g", "8g", "16g", "32g"] else 1
+                drv_options,
+                index=drv_options.index(drv_mem_val) if drv_mem_val in drv_options else 2
             )
+            exe_options = ["1g", "2g", "3g", "4g", "5g", "6g", "7g", "8g", "10g", "12g", "14g", "16g", "20g", "24g", "28g", "32g", "48g", "64g"]
             in_exe_mem = st.selectbox(
                 "Executor Memory (`spark.executor.memory`)",
-                ["2g", "4g", "8g", "16g", "32g", "64g"],
-                index=["2g", "4g", "8g", "16g", "32g", "64g"].index(exe_mem_val) if exe_mem_val in ["2g", "4g", "8g", "16g", "32g", "64g"] else 1
+                exe_options,
+                index=exe_options.index(exe_mem_val) if exe_mem_val in exe_options else 1
             )
             in_mem_frac = st.slider("Execution & Storage Memory Fraction (`spark.memory.fraction`)", 0.5, 0.95, float(mem_frac_val), 0.05)
 

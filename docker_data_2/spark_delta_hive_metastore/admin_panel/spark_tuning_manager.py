@@ -66,6 +66,22 @@ PROFILES = {
         "offheap_size": "1g",
         "kryo_serializer": True
     },
+    "🟠 Heavy Plus (12GB - 14GB RAM / High Concurrency)": {
+        "id": "heavy_plus",
+        "description": "High memory profile for 12GB - 14GB worker nodes, complex multi-table joins, and 12 total cluster cores.",
+        "driver_memory": "4g",
+        "executor_memory": "12g",
+        "executor_cores": 4,
+        "max_cores": 12,
+        "shuffle_partitions": 300,
+        "aqe_enabled": True,
+        "aqe_coalesce": True,
+        "memory_fraction": 0.8,
+        "storage_fraction": 0.4,
+        "offheap_enabled": True,
+        "offheap_size": "1g",
+        "kryo_serializer": True
+    },
     "🚀 Extreme (Petabyte Scale / High Throughput)": {
         "id": "extreme",
         "description": "Maximum horsepower for multi-gigabyte or massive partition fan-outs with 400+ partitions and aggressive caching.",
