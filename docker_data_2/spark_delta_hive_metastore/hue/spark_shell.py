@@ -59,34 +59,26 @@ class SparkApi(Api):
 
   @staticmethod
   def get_livy_props(lang, properties=None):
-    props = dict([(p['name'], p['value']) for p in SparkConfiguration.PROPERTIES if p['name'] not in ('driverMemory', 'executorMemory', 'executorCores', 'driverCores') and p.get('value')])
+    props = dict([(p['name'], p['value']) for p in SparkConfiguration.PROPERTIES if p['name'] not in ('driverMemory', 'executorMemory', 'executorCores', 'driverCores')])
     if properties is not None:
       for p in properties:
-        if 'name' in p and 'value' in p and p['value']:
+        if isinstance(p, dict) and 'name' in p and 'value' in p and p['value'] is not None and p['name'] not in ('driverMemory', 'executorMemory', 'executorCores', 'driverCores'):
           props[p['name']] = p['value']
 
-    # HUE-4761: Hue's session request is causing Livy to fail with "JsonMappingException: Can not deserialize
-    # instance of scala.collection.immutable.List out of VALUE_STRING token" due to List type values
-    # not being formed properly, they are quoted csv strings (without brackets) instead of proper List
-    # types, this is for keys; archives, jars, files and pyFiles. The Mako frontend probably should be
-    # modified to pass the values as Livy expects but for now we coerce these types to be Lists.
-    # Issue only occurs when non-default values are used because the default path properly sets the
-    # empty list '[]' for these four values.
-    # Note also that Livy has a 90 second timeout for the session request to complete, this needs to
-    # be increased for requests that take longer, for example when loading large archives.
     for key in ['archives', 'jars', 'files', 'pyFiles']:
       if key not in props:
-        continue
-      if type(props[key]) is list:
-        continue
-      LOG.debug("Check List type: {} was not a list".format(key))
-      _tmp = props[key]
-      props[key] = _tmp.split(",")
+        props[key] = []
+      elif type(props[key]) is not list:
+        _tmp = props[key]
+        props[key] = _tmp.split(",") if _tmp else []
 
-    # Convert the conf list to a dict for Livy
-    LOG.debug("Property Spark Conf kvp list from UI is: " + str(props['conf']))
-    props['conf'] = {conf.get('key'): conf.get('value') for i, conf in enumerate(props['conf'])}
-    LOG.debug("Property Spark Conf dictionary is: " + str(props['conf']))
+    # Convert the conf list to a dict for Livy safely
+    if 'conf' not in props or props['conf'] is None:
+      props['conf'] = {}
+    elif isinstance(props['conf'], list):
+      props['conf'] = {conf.get('key'): conf.get('value') for i, conf in enumerate(props['conf']) if isinstance(conf, dict) and 'key' in conf}
+    elif not isinstance(props['conf'], dict):
+      props['conf'] = {}
 
     props['kind'] = 'sql' if lang == 'sparksql' else lang
 
