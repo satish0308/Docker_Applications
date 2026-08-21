@@ -438,6 +438,18 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
             except Exception:
                 pass
 
+        # Persist worker scaling history to tuning config
+        try:
+            cur_cfg = load_tuning_config()
+            cur_cfg["worker_scaling"] = {
+                "worker_count": target_count,
+                "worker_ram": worker_memory,
+                "worker_cores": worker_cores
+            }
+            save_tuning_config(cur_cfg)
+        except Exception:
+            pass
+
         return f"Successfully provisioned {target_count} worker node(s) with {worker_memory} RAM & {worker_cores} Cores each!", 0
 
     except Exception as e:

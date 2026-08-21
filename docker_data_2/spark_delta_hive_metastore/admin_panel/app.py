@@ -1556,13 +1556,29 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             "or scale down to conserve CPU and RAM resources when idle."
         )
 
+        # Load persistent worker scaling history or live cluster capacity
+        cur_cfg = spark_tuning_manager.load_tuning_config()
+        saved_scale = cur_cfg.get("worker_scaling", {})
+        live_workers = [w for w in metrics.get("worker_list", []) if "ALIVE" in w.get("State", "")]
+        if live_workers:
+            live_cores = int(live_workers[0].get("Cores", 6))
+            live_mem_mb = int(live_workers[0].get("Memory (MB)", 10240))
+            live_ram = f"{live_mem_mb // 1024}g"
+        else:
+            live_cores = 6
+            live_ram = "10g"
+
+        default_target_scale = saved_scale.get("worker_count", max(1, metrics['alive_workers']))
+        default_ram = saved_scale.get("worker_ram", live_ram)
+        default_cores = saved_scale.get("worker_cores", live_cores)
+
         col_sc1, col_sc2 = st.columns([2, 1])
         with col_sc1:
             target_scale = st.slider(
                 "Target Worker Node Count:",
                 min_value=1,
                 max_value=8,
-                value=max(1, metrics['alive_workers']),
+                value=int(default_target_scale) if 1 <= int(default_target_scale) <= 8 else max(1, metrics['alive_workers']),
                 help="Number of distributed worker node containers."
             )
             col_ns1, col_ns2 = st.columns(2)
@@ -1571,7 +1587,7 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
                 sel_worker_ram = st.selectbox(
                     "RAM per Worker Node",
                     worker_ram_options,
-                    index=worker_ram_options.index("8g") if "8g" in worker_ram_options else 4,
+                    index=worker_ram_options.index(default_ram) if default_ram in worker_ram_options else 5,
                     help="Hardware memory envelope allocated per worker daemon."
                 )
             with col_ns2:
@@ -1579,7 +1595,7 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
                 sel_worker_cores = st.selectbox(
                     "CPU Cores per Worker Node",
                     worker_core_options,
-                    index=worker_core_options.index(4) if 4 in worker_core_options else 3,
+                    index=worker_core_options.index(default_cores) if default_cores in worker_core_options else 4,
                     help="CPU cores pool allocated per worker daemon."
                 )
 
