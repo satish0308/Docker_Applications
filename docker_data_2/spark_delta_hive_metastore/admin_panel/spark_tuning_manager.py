@@ -208,8 +208,37 @@ def update_livy_conf(params):
             except Exception as e:
                 print(f"Error updating Livy conf {p}: {e}")
 
+def update_hue_ini(params):
+    """Updates hue/hue.ini options for pyspark and sparksql interpreters with tuned parameters."""
+    hue_paths = ["/app/hue/hue.ini", "hue/hue.ini"]
+    for p in hue_paths:
+        if os.path.exists(p):
+            try:
+                import re
+                with open(p, "r") as f:
+                    content = f.read()
+                
+                drv_mem = params.get("driver_memory", "4g")
+                exe_mem = params.get("executor_memory", "8g")
+                exe_cores = params.get("executor_cores", 6)
+                max_cores = params.get("max_cores", 12)
+                dra_val = "true" if params.get("dynamic_allocation", True) else "false"
+
+                opts_str = (
+                    f'options=\'{{"url": "http://livy:8998", "api_url": "http://livy:8998", '
+                    f'"driverMemory": "{drv_mem}", "executorMemory": "{exe_mem}", "executorCores": {exe_cores}, '
+                    f'"conf": {{"spark.cores.max": "{max_cores}", "spark.dynamicAllocation.enabled": "{dra_val}", '
+                    f'"spark.executor.memory": "{exe_mem}", "spark.executor.cores": "{exe_cores}", "livy.rsc.sasl.enabled": "false"}}}}\''
+                )
+                
+                new_content = re.sub(r"options='\{\"url\": \"http://livy:8998\".*?'", opts_str, content)
+                with open(p, "w") as f:
+                    f.write(new_content)
+            except Exception as e:
+                print(f"Error updating Hue conf {p}: {e}")
+
 def save_tuning_config(config_dict):
-    """Saves active Spark tuning configuration, syncs spark-defaults.conf & livy.conf, and reloads Livy."""
+    """Saves active Spark tuning configuration, syncs spark-defaults.conf, livy.conf & hue.ini, and reloads Livy."""
     paths = [TUNING_CONFIG_PATH, "spark_tuning_config.json", "/app/spark_tuning_config.json", "admin_panel/spark_tuning_config.json", "/app/python_scripts/spark_tuning_config.json"]
     for p in paths:
         try:
@@ -221,6 +250,7 @@ def save_tuning_config(config_dict):
     if "params" in config_dict:
         update_spark_defaults_conf(config_dict["params"])
         update_livy_conf(config_dict["params"])
+        update_hue_ini(config_dict["params"])
         try:
             client = docker.from_env()
             livy_c = client.containers.get("livy")
