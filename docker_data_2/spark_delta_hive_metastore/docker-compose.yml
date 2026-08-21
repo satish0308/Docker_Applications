@@ -181,10 +181,12 @@ services:
       - SPARK_MASTER_URL=spark://spark:7077
       - SPARK_WORKER_CORES=4
       - SPARK_WORKER_MEMORY=4g
+      - SPARK_PUBLIC_DNS=localhost
+      - SPARK_WORKER_WEBUI_PORT=8081
     depends_on:
       - spark
-    expose:
-      - "8081"
+    ports:
+      - "8081:8081"
     networks:
       - hadoop-network
 
@@ -326,6 +328,7 @@ services:
       - ./python_scripts:/app/python_scripts
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - ./livy:/app/livy
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro
       - ./backups:/backups

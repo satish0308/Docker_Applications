@@ -37,10 +37,10 @@ PROFILES = {
     "🟡 Medium (Standard ETL / Daily Batches)": {
         "id": "medium",
         "description": "Recommended for 100MB - 1GB files, multi-partition datasets with Adaptive Query Execution enabled.",
-        "driver_memory": "2g",
-        "executor_memory": "4g",
+        "driver_memory": "3g",
+        "executor_memory": "2g",
         "executor_cores": 2,
-        "max_cores": 4,
+        "max_cores": 6,
         "shuffle_partitions": 64,
         "aqe_enabled": True,
         "aqe_coalesce": True,
@@ -376,6 +376,11 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
         added = 0
         for i in range(1, target_count + 1):
             w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
+            w_port = 8080 + i  # Worker 1: 8081, Worker 2: 8082, Worker 3: 8083...
+            worker_env = target_env + [
+                f"SPARK_PUBLIC_DNS=localhost",
+                f"SPARK_WORKER_WEBUI_PORT=8081"
+            ]
             try:
                 c = client.containers.get(w_name)
                 c_env = c.attrs['Config']['Env'] or []
@@ -389,8 +394,9 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
                 image=image_name,
                 name=w_name,
                 detach=True,
-                environment=target_env,
+                environment=worker_env,
                 network=network_name,
+                ports={"8081/tcp": w_port},
                 volumes=vol_map,
                 entrypoint=entrypoint
             )
