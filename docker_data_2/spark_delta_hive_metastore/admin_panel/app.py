@@ -1733,9 +1733,9 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             per_node_ram_gb = execs_per_node * exe_mem_mb
             
             st.info(
-                f"📊 **Worker Node Layout**: **{execs_per_node} Executor(s) per Worker** "
+                f"📐 **Projected Sizing Target**: **{execs_per_node} Executor(s) per Worker Node** "
                 f"({in_exe_cores} Cores & {in_exe_mem} RAM each $\\rightarrow$ **{per_node_ram_gb} GB RAM / {execs_per_node * in_exe_cores} Cores per worker**). "
-                f"Total Cluster: **{total_active_executors} active Executor(s)**."
+                f"Target Cluster Fleet: **{total_active_executors} planned Executor(s)**."
             )
 
             in_shuf_parts = st.number_input("Shuffle Partitions (`spark.sql.shuffle.partitions`)", 2, 1000, int(shuf_parts_val), step=8)
