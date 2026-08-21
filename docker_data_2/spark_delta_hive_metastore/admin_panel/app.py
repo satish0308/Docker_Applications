@@ -1683,8 +1683,43 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
 
         with col_t2:
             st.markdown("#### ⚡ CPU Cores & Parallelism")
-            in_exe_cores = st.number_input("Cores Per Executor (`spark.executor.cores`)", 1, 16, int(exe_cores_val))
-            in_max_cores = st.number_input("Max Cores for Cluster Job (`spark.cores.max`)", 1, 64, int(max_cores_val))
+            col_epw1, col_epw2 = st.columns(2)
+            with col_epw1:
+                in_exe_cores = st.number_input(
+                    "Cores Per Executor (`spark.executor.cores`)",
+                    min_value=1,
+                    max_value=16,
+                    value=int(exe_cores_val),
+                    help="CPU cores assigned to each executor JVM. Controls how many executors fit on each worker node."
+                )
+            with col_epw2:
+                in_max_cores = st.number_input(
+                    "Max Cores for Cluster Job (`spark.cores.max`)",
+                    min_value=1,
+                    max_value=64,
+                    value=int(max_cores_val),
+                    help="Global ceiling of CPU cores across all workers combined."
+                )
+
+            # Dynamic Node Layout Calculator
+            active_node_cores = 6
+            if metrics.get("worker_list"):
+                try:
+                    active_node_cores = int(metrics["worker_list"][0].get("Cores", 6))
+                except Exception:
+                    pass
+            
+            execs_per_node = max(1, active_node_cores // in_exe_cores) if in_exe_cores <= active_node_cores else 1
+            total_active_executors = max(1, in_max_cores // in_exe_cores)
+            exe_mem_mb = int(re.sub(r'[^0-9]', '', in_exe_mem)) if 'g' in in_exe_mem else 1
+            per_node_ram_gb = execs_per_node * exe_mem_mb
+            
+            st.info(
+                f"📊 **Worker Node Layout**: **{execs_per_node} Executor(s) per Worker** "
+                f"({in_exe_cores} Cores & {in_exe_mem} RAM each $\\rightarrow$ **{per_node_ram_gb} GB RAM / {execs_per_node * in_exe_cores} Cores per worker**). "
+                f"Total Cluster: **{total_active_executors} active Executor(s)**."
+            )
+
             in_shuf_parts = st.number_input("Shuffle Partitions (`spark.sql.shuffle.partitions`)", 2, 1000, int(shuf_parts_val), step=8)
 
         st.markdown("#### 🚀 Advanced Query Optimizations")
