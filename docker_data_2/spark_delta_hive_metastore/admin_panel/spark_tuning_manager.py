@@ -392,7 +392,7 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
         added = 0
         for i in range(1, target_count + 1):
             w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
-            w_port = 8080 + i  # Worker 1: 8081, Worker 2: 8082, Worker 3: 8083...
+            w_port = 8090 + i  # Worker 1: 8091, Worker 2: 8092, Worker 3: 8093... (Avoids pgadmin on 8081)
             worker_env = target_env + [
                 f"SPARK_PUBLIC_DNS=localhost",
                 f"SPARK_WORKER_WEBUI_PORT=8081"

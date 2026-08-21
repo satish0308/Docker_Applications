@@ -186,7 +186,7 @@ services:
     depends_on:
       - spark
     ports:
-      - "8081:8081"
+      - "8091:8081"
     networks:
       - hadoop-network
 
