@@ -129,6 +129,7 @@ def update_spark_defaults_conf(params):
                     "spark.executor.memory": str(params.get("executor_memory", "4g")),
                     "spark.executor.cores": str(params.get("executor_cores", 2)),
                     "spark.cores.max": str(params.get("max_cores", 4)),
+                    "spark.dynamicAllocation.maxExecutors": str(params.get("max_cores", 12)),
                     "spark.sql.shuffle.partitions": str(params.get("shuffle_partitions", 64)),
                     "spark.sql.adaptive.enabled": "true" if params.get("aqe_enabled", True) else "false",
                     "spark.sql.adaptive.coalescePartitions.enabled": "true" if params.get("aqe_coalesce", True) else "false",
@@ -173,6 +174,7 @@ def update_livy_conf(params):
                     "livy.spark.executor.cores": str(params.get("executor_cores", 2)),
                     "livy.spark.executor.memory": str(params.get("executor_memory", "4g")),
                     "livy.spark.cores.max": str(params.get("max_cores", 6)),
+                    "livy.spark.dynamicAllocation.maxExecutors": str(params.get("max_cores", 12)),
                     "livy.spark.driver.memory": str(params.get("driver_memory", "2g"))
                 }
                 
