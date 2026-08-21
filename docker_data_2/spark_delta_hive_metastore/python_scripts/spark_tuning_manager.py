@@ -264,8 +264,12 @@ def save_tuning_config(config_dict):
         update_hue_ini(config_dict["params"])
         try:
             client = docker.from_env()
-            livy_c = client.containers.get("livy")
-            livy_c.restart(timeout=3)
+            for c_name in ["spark", "livy", "hue"]:
+                try:
+                    c = client.containers.get(c_name)
+                    c.restart(timeout=3)
+                except Exception:
+                    pass
         except Exception:
             pass
 
