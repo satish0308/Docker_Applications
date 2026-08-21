@@ -124,11 +124,14 @@ def update_spark_defaults_conf(params):
                 with open(p, "r") as f:
                     lines = f.readlines()
                 
+                dra_bool = params.get("dynamic_allocation", True)
                 tune_map = {
                     "spark.driver.memory": str(params.get("driver_memory", "2g")),
                     "spark.executor.memory": str(params.get("executor_memory", "4g")),
                     "spark.executor.cores": str(params.get("executor_cores", 2)),
                     "spark.cores.max": str(params.get("max_cores", 4)),
+                    "spark.dynamicAllocation.enabled": "true" if dra_bool else "false",
+                    "spark.dynamicAllocation.shuffleTracking.enabled": "true" if dra_bool else "false",
                     "spark.dynamicAllocation.maxExecutors": str(params.get("max_cores", 12)),
                     "spark.sql.shuffle.partitions": str(params.get("shuffle_partitions", 64)),
                     "spark.sql.adaptive.enabled": "true" if params.get("aqe_enabled", True) else "false",
@@ -170,10 +173,13 @@ def update_livy_conf(params):
                 with open(p, "r") as f:
                     lines = f.readlines()
                 
+                dra_bool = params.get("dynamic_allocation", True)
                 tune_map = {
                     "livy.spark.executor.cores": str(params.get("executor_cores", 2)),
                     "livy.spark.executor.memory": str(params.get("executor_memory", "4g")),
                     "livy.spark.cores.max": str(params.get("max_cores", 6)),
+                    "livy.spark.dynamicAllocation.enabled": "true" if dra_bool else "false",
+                    "livy.spark.dynamicAllocation.shuffleTracking.enabled": "true" if dra_bool else "false",
                     "livy.spark.dynamicAllocation.maxExecutors": str(params.get("max_cores", 12)),
                     "livy.spark.driver.memory": str(params.get("driver_memory", "2g"))
                 }
@@ -249,11 +255,14 @@ def build_spark_submit_conf_args(params):
     offheap_sz = params.get("offheap_size", "0")
     kryo = params.get("kryo_serializer", True)
 
+    dra = "true" if params.get("dynamic_allocation", True) else "false"
     args = [
         f"--driver-memory {driver_mem}",
         f"--executor-memory {exec_mem}",
         f"--conf spark.executor.cores={exec_cores}",
         f"--conf spark.cores.max={max_cores}",
+        f"--conf spark.dynamicAllocation.enabled={dra}",
+        f"--conf spark.dynamicAllocation.shuffleTracking.enabled={dra}",
         f"--conf spark.sql.shuffle.partitions={shuffle_parts}",
         f"--conf spark.sql.adaptive.enabled={aqe}",
         f"--conf spark.sql.adaptive.coalescePartitions.enabled={aqe_coalesce}",

@@ -1650,6 +1650,7 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             offheap_val = source_dict.get("offheap_enabled", prof_data["offheap_enabled"])
             offheap_sz_val = source_dict.get("offheap_size", prof_data["offheap_size"])
             kryo_val = source_dict.get("kryo_serializer", prof_data["kryo_serializer"])
+            dra_val = source_dict.get("dynamic_allocation", True)
         else:
             st.info("🛠️ **Custom Mode**: Configure exact parameters according to your specific hardware and dataset constraints.")
             drv_mem_val = active_params.get("driver_memory", "3g")
@@ -1663,6 +1664,7 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             offheap_val = active_params.get("offheap_enabled", False)
             offheap_sz_val = active_params.get("offheap_size", "0")
             kryo_val = active_params.get("kryo_serializer", True)
+            dra_val = active_params.get("dynamic_allocation", True)
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -1722,9 +1724,14 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
 
             in_shuf_parts = st.number_input("Shuffle Partitions (`spark.sql.shuffle.partitions`)", 2, 1000, int(shuf_parts_val), step=8)
 
-        st.markdown("#### 🚀 Advanced Query Optimizations")
+        st.markdown("#### 🚀 Advanced Query Optimizations & Allocation Mode")
         col_o1, col_o2, col_o3 = st.columns(3)
         with col_o1:
+            in_dra = st.checkbox(
+                "Enable Dynamic Resource Allocation (DRA)",
+                value=bool(dra_val),
+                help="When enabled, executors scale dynamically based on backlog. When unchecked, full static executor memory (e.g. 8GB) and cores are locked immediately on startup."
+            )
             in_aqe = st.checkbox("Enable Adaptive Query Execution (AQE)", value=bool(aqe_val))
             in_aqe_coal = st.checkbox("AQE Dynamic Partition Coalescing", value=bool(aqe_coal_val), disabled=not in_aqe)
         with col_o2:
@@ -1733,11 +1740,15 @@ elif menu == "⚡ Spark Tuning & Cluster Scaling":
             in_offheap = st.checkbox("Enable Off-Heap Memory (`spark.memory.offHeap.enabled`)", value=bool(offheap_val))
             in_offheap_sz = st.selectbox("Off-Heap Size", ["512m", "1g", "2g", "4g"], index=["512m", "1g", "2g", "4g"].index(offheap_sz_val) if offheap_sz_val in ["512m", "1g", "2g", "4g"] else 1, disabled=not in_offheap)
 
+        if not in_dra:
+            st.warning("⚡ **Static Dedicated Allocation Mode Active**: Spark will allocate monolithic fixed executors (e.g. full 8GB RAM & 6 Cores per worker) immediately without splitting into micro-units.")
+
         compiled_params = {
             "driver_memory": in_drv_mem,
             "executor_memory": in_exe_mem,
             "executor_cores": in_exe_cores,
             "max_cores": in_max_cores,
+            "dynamic_allocation": in_dra,
             "shuffle_partitions": in_shuf_parts,
             "aqe_enabled": in_aqe,
             "aqe_coalesce": in_aqe_coal,
