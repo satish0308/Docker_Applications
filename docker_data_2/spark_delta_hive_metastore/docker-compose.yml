@@ -107,7 +107,7 @@ services:
       - namenode
       - datanode
     ports:
-      - "10000:10000"
+      - "10004:10000"
       - "10002:10002"
     networks:
       - hadoop-network
@@ -194,6 +194,7 @@ services:
       context: .
       dockerfile: spark.Dockerfile
     container_name: spark-thriftserver
+    hostname: spark-thriftserver
     restart: unless-stopped
     volumes:
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
