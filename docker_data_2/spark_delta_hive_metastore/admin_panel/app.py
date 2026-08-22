@@ -713,53 +713,70 @@ ui_components.render_html("""
 </div>
 """)
 
+SUITE_OPTIONS = [
+    "🚀 DATA OPS & INGESTION",
+    "⚡ COMPUTE & SQL STUDIO",
+    "📦 STORAGE & METASTORE",
+    "📊 SYSTEM OBSERVABILITY"
+]
+
+MODULE_MAP = {
+    "🚀 DATA OPS & INGESTION": [
+        "📥 Data Ingestion & Partitioning",
+        "⏰ Scheduled Ingestion Jobs",
+        "⏳ Delta Time-Travel & Maintenance"
+    ],
+    "⚡ COMPUTE & SQL STUDIO": [
+        "⚡ Persistent SQL Studio & Tracer",
+        "⚙️ Spark Tuning & Cluster Scaling",
+        "🔍 Cluster Diagnostics"
+    ],
+    "📦 STORAGE & METASTORE": [
+        "🗄️ Metastore Table Explorer",
+        "📦 Table Backup & Restore"
+    ],
+    "📊 SYSTEM OBSERVABILITY": [
+        "📊 Cluster Health & Links",
+        "📜 Container Logs Viewer",
+        "🧹 One-Click Cleanup",
+        "📚 Platform Docs & Guide Center"
+    ]
+}
+
+# Resolve active suite from query params across hard refreshes (Ctrl+F5)
+saved_suite = st.query_params.get("suite", "")
+default_suite_idx = 0
+for idx, s in enumerate(SUITE_OPTIONS):
+    if s == saved_suite:
+        default_suite_idx = idx
+        break
+
 nav_section = st.sidebar.selectbox(
     "Select Suite:",
-    [
-        "🚀 DATA OPS & INGESTION",
-        "⚡ COMPUTE & SQL STUDIO",
-        "📦 STORAGE & METASTORE",
-        "📊 SYSTEM OBSERVABILITY"
-    ],
-    index=0
+    SUITE_OPTIONS,
+    index=default_suite_idx,
+    key="nav_suite_sel"
 )
 
-if nav_section == "🚀 DATA OPS & INGESTION":
-    menu = st.sidebar.radio(
-        "Module Selection",
-        [
-            "📥 Data Ingestion & Partitioning",
-            "⏰ Scheduled Ingestion Jobs",
-            "⏳ Delta Time-Travel & Maintenance"
-        ]
-    )
-elif nav_section == "⚡ COMPUTE & SQL STUDIO":
-    menu = st.sidebar.radio(
-        "Module Selection",
-        [
-            "⚡ Persistent SQL Studio & Tracer",
-            "⚙️ Spark Tuning & Cluster Scaling",
-            "🔍 Cluster Diagnostics"
-        ]
-    )
-elif nav_section == "📦 STORAGE & METASTORE":
-    menu = st.sidebar.radio(
-        "Module Selection",
-        [
-            "🗄️ Metastore Table Explorer",
-            "📦 Table Backup & Restore"
-        ]
-    )
-else:
-    menu = st.sidebar.radio(
-        "Module Selection",
-        [
-            "📊 Cluster Health & Links",
-            "📜 Container Logs Viewer",
-            "🧹 One-Click Cleanup",
-            "📚 Platform Docs & Guide Center"
-        ]
-    )
+# Resolve active module for chosen suite from query params across hard refreshes
+curr_modules = MODULE_MAP.get(nav_section, MODULE_MAP["🚀 DATA OPS & INGESTION"])
+saved_module = st.query_params.get("module", "")
+default_mod_idx = 0
+for idx, m in enumerate(curr_modules):
+    if m == saved_module:
+        default_mod_idx = idx
+        break
+
+menu = st.sidebar.radio(
+    "Module Selection",
+    curr_modules,
+    index=default_mod_idx,
+    key=f"nav_mod_{nav_section}"
+)
+
+# Sync current selection to browser URL query parameters
+st.query_params["suite"] = nav_section
+st.query_params["module"] = menu
 
 # Active Tuning Profile Pill in Sidebar
 current_cfg = spark_tuning_manager.load_tuning_config()
