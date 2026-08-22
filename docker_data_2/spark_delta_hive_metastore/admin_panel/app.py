@@ -1880,7 +1880,7 @@ elif menu == "⏰ Scheduled Ingestion Jobs":
             Automate recurring batch pipelines to monitor directories and append delta updates into Hive tables.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     jobs = load_scheduled_jobs()
     col_j1, col_j2 = st.columns([1, 1])
@@ -1936,7 +1936,7 @@ elif menu == "📊 Cluster Health & Links":
             Real-time health status, endpoints, and telemetry for all distributed Big Data containers.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     df_containers = get_container_stats()
     if not df_containers.empty:
@@ -1956,7 +1956,7 @@ elif menu == "📜 Container Logs Viewer":
             Inspect live stdout and stderr streams directly from any cluster service container.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     all_containers = [c.name for c in client.containers.list(all=True)]
     if all_containers:
@@ -1982,7 +1982,7 @@ elif menu == "🧹 One-Click Cleanup":
             Instantly terminate orphaned Livy sessions, clear idle PostgreSQL metastore connections, and self-heal HDFS missing blocks.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     if st.button("🚀 Run Full Memory & Session Cleanup", type="primary", use_container_width=True):
         with st.spinner("Purging hanging sessions and memory..."):
@@ -2003,7 +2003,7 @@ elif menu == "🔍 Cluster Diagnostics":
             Perform full-mesh port connectivity probing across Spark Master, Workers 1-4, Livy, NameNode, YARN, MinIO, and HiveServer2.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     if st.button("▶️ Run Automated Multi-Port Diagnostics", type="primary", use_container_width=True):
         with st.spinner("Diagnosing cluster network endpoints..."):
@@ -2022,7 +2022,7 @@ elif menu == "📚 Platform Docs & Guide Center":
             Architecture guides, connection strings, tuning formulas, and disaster recovery blueprints.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     doc_files = {
         "⚡ Spark Performance Tuning Benchmark (59.18M Rows)": "/app/docs/spark_performance_tuning_benchmark.md",

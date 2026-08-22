@@ -6,7 +6,7 @@ Provides modern glassmorphism, responsive cards, neon status pills, executive he
 import streamlit as st
 import textwrap
 
-def render_html(html_str):
+def render_html(html_str, *args, **kwargs):
     """Renders HTML safely in Streamlit without markdown whitespace codeblock artifacts."""
     st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
 
