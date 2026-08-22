@@ -1,0 +1,1 @@
+{"status": "success", "query_id": "query_1787380213_ffe97f", "sql_query": "DROP TABLE IF EXISTS inv_item;", "total_rows": 0, "returned_rows": 0, "elapsed_sec": 6.14, "schema": [], "records": []}

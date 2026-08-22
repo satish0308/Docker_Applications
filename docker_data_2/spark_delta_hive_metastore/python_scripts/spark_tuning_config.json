@@ -1,12 +1,12 @@
 {
-  "active_profile": "\ud83d\udd34 Heavy (Large Big Data / >10M Rows)",
+  "active_profile": "\ud83d\udfe0 Heavy Plus (12GB - 14GB RAM / High Concurrency)",
   "params": {
     "driver_memory": "6g",
-    "executor_memory": "8g",
-    "executor_cores": 4,
-    "max_cores": 16,
+    "executor_memory": "10g",
+    "executor_cores": 10,
+    "max_cores": 12,
     "dynamic_allocation": false,
-    "shuffle_partitions": 200,
+    "shuffle_partitions": 300,
     "aqe_enabled": true,
     "aqe_coalesce": true,
     "memory_fraction": 0.8,
