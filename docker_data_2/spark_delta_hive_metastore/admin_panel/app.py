@@ -213,11 +213,14 @@ try:
     df = spark.sql("""{escaped_sql}""")
     
     schema_info = [{{"name": f.name, "type": str(f.dataType)}} for f in df.schema.fields]
-    row_count = df.count()
-    limited_df = df.limit({max_rows})
-    
-    records_json = limited_df.toJSON().collect()
-    records = [json.loads(r) for r in records_json]
+    if len(schema_info) > 0:
+        row_count = df.count()
+        limited_df = df.limit({max_rows})
+        records_json = limited_df.toJSON().collect()
+        records = [json.loads(r) for r in records_json]
+    else:
+        row_count = 0
+        records = []
     
     elapsed = time.time() - start_t
     print(f"--> ✅ [Spark Engine] Query completed! Total Rows: {{row_count}}, Returned: {{len(records)}}, Time: {{elapsed:.2f}}s")
@@ -242,10 +245,12 @@ except Exception as e:
         "elapsed_sec": round(elapsed, 2)
     }}
 finally:
+    try:
+        with open("/tmp/result_{query_id}.json", "w") as f:
+            json.dump(result_payload, f)
+    except Exception:
+        pass
     spark.stop()
-
-with open("/tmp/result_{query_id}.json", "w") as f:
-    json.dump(result_payload, f)
 '''
         script_filename = f"sql_run_{query_id}.py"
         copy_data_to_container(spark_cont, script_content.encode('utf-8'), "/tmp", script_filename)
@@ -297,11 +302,16 @@ with open("/tmp/result_{query_id}.json", "w") as f:
                     recent_logs=full_log_text[-3000:]
                 )
         except Exception as e_res:
+            err_details = str(e_res)
+            if "Could not find the file" in err_details and full_log_text:
+                error_lines = [l for l in full_log_text.splitlines() if "Exception:" in l or "Error:" in l or "Caused by:" in l or "ERROR" in l]
+                if error_lines:
+                    err_details = "\n".join(error_lines[-5:])
             update_sql_query_record(
                 query_id,
                 status="FAILED",
                 finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                error_msg=f"Could not retrieve result file: {e_res}",
+                error_msg=f"Query Execution Interrupted / Error: {err_details}",
                 recent_logs=full_log_text[-3000:]
             )
             
