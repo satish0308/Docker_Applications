@@ -35,9 +35,12 @@ fi
 # Start Spark Thrift Server (Shared SQL / BI Server)
 if [ "$SPARK_MODE" == "thriftserver" ]; then
     echo "Starting Spark Thrift Server on port 10000 connected to $SPARK_MASTER_URL..."
-    exec $SPARK_HOME/bin/spark-class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 \
+    exec $SPARK_HOME/bin/spark-submit \
+        --class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 \
         --master "$SPARK_MASTER_URL" \
         --name "Shared-Spark-ThriftServer" \
+        --conf spark.hadoop.hive.server2.thrift.port=10000 \
+        --conf spark.hadoop.hive.server2.thrift.bind.host=0.0.0.0 \
         --hiveconf hive.server2.thrift.port=10000 \
         --hiveconf hive.server2.thrift.bind.host=0.0.0.0
 fi
