@@ -38,11 +38,11 @@ def inject_v2_theme():
     }
 
     /* High-Contrast Labels & Widget Headers */
-    label, .stWidgetLabel p, [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] span {
-        color: #f8fafc !important;
-        font-weight: 600 !important;
-        font-size: 0.90rem !important;
-        letter-spacing: -0.01em;
+    label, .stWidgetLabel, .stWidgetLabel p, [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] span {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 0.92rem !important;
+        letter-spacing: -0.01em !important;
     }
 
     /* High-Contrast Captions & Subtexts */
@@ -54,29 +54,119 @@ def inject_v2_theme():
 
     /* Sidebar Styling */
     section[data-testid="stSidebar"] {
-        background: rgba(13, 18, 30, 0.92) !important;
+        background: rgba(13, 18, 30, 0.95) !important;
         backdrop-filter: blur(24px) !important;
         border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
     }
 
-    section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] span {
+    section[data-testid="stSidebar"] label, 
+    section[data-testid="stSidebar"] label p, 
+    section[data-testid="stSidebar"] label span, 
+    section[data-testid="stSidebar"] span {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+
+    /* Sidebar Radio Options */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        background: rgba(255, 255, 255, 0.04) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        margin-bottom: 6px !important;
+        padding: 8px 14px !important;
+        font-weight: 600 !important;
+        font-size: 0.92rem !important;
+        color: #e2e8f0 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
+        background: rgba(99, 102, 241, 0.25) !important;
+        border-color: rgba(99, 102, 241, 0.5) !important;
+        color: #ffffff !important;
+        transform: translateX(4px) !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label span {
         color: #f8fafc !important;
         font-weight: 600 !important;
     }
-    
-    section[data-testid="stSidebar"] .stRadio label {
-        font-weight: 600 !important;
-        font-size: 0.92rem !important;
-        padding: 8px 12px !important;
-        border-radius: 8px !important;
-        color: #e2e8f0 !important;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+
+    /* Complete Selectbox & Dropdown High-Contrast Styling */
+    div[data-testid="stSelectbox"] {
+        background: transparent !important;
     }
 
-    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover {
-        background: rgba(255, 255, 255, 0.08) !important;
-        color: #38bdf8 !important;
-        transform: translateX(3px);
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stSelectbox"] label p,
+    div[data-testid="stSelectbox"] label span {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+    }
+
+    div[data-baseweb="select"],
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="select"] div[role="combobox"],
+    div[data-baseweb="select"] div[aria-haspopup="listbox"] {
+        background-color: #0f172a !important;
+        background: #0f172a !important;
+        border: 1px solid rgba(255, 255, 255, 0.25) !important;
+        border-radius: 10px !important;
+    }
+
+    div[data-baseweb="select"] * {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }
+
+    div[data-baseweb="select"] svg {
+        fill: #ffffff !important;
+        color: #ffffff !important;
+    }
+
+    /* BaseWeb Popover / Dropdown Menu (Open State) */
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="popover"] ul,
+    div[data-baseweb="menu"] {
+        background-color: #0d1322 !important;
+        background: #0d1322 !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9) !important;
+    }
+
+    li[data-baseweb="menu-item"],
+    li[data-baseweb="menu-item"] * {
+        background-color: transparent !important;
+        color: #f8fafc !important;
+        font-size: 0.92rem !important;
+        font-weight: 600 !important;
+    }
+
+    li[data-baseweb="menu-item"]:hover,
+    li[data-baseweb="menu-item"][aria-selected="true"] {
+        background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%) !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
+    }
+
+    li[data-baseweb="menu-item"]:hover * {
+        color: #ffffff !important;
+    }
+
+    /* MultiSelect Tags */
+    span[data-baseweb="tag"] {
+        background: rgba(99, 102, 241, 0.35) !important;
+        border: 1px solid rgba(99, 102, 241, 0.6) !important;
+        border-radius: 6px !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }
+
+    span[data-baseweb="tag"] span {
+        color: #ffffff !important;
     }
 
     /* Modern Glassmorphic Cards */
@@ -266,56 +356,6 @@ def inject_v2_theme():
         color: #ffffff !important;
         transform: translateY(-2px);
         box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
-    }
-
-    /* High-Contrast BaseWeb Selectbox & Dropdown Popovers */
-    div[data-baseweb="select"] > div {
-        background-color: #0f172a !important;
-        border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        border-radius: 10px !important;
-        color: #ffffff !important;
-        font-weight: 500 !important;
-    }
-
-    div[data-baseweb="select"] span {
-        color: #ffffff !important;
-        font-weight: 500 !important;
-    }
-
-    div[data-baseweb="popover"] {
-        background-color: #0f172a !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85) !important;
-    }
-
-    ul[data-baseweb="menu"] {
-        background-color: #0f172a !important;
-    }
-
-    li[data-baseweb="menu-item"] {
-        color: #f8fafc !important;
-        font-size: 0.90rem !important;
-        font-weight: 500 !important;
-        padding: 9px 16px !important;
-    }
-
-    li[data-baseweb="menu-item"]:hover {
-        background-color: rgba(99, 102, 241, 0.3) !important;
-        color: #ffffff !important;
-    }
-
-    /* MultiSelect Tags */
-    span[data-baseweb="tag"] {
-        background: rgba(99, 102, 241, 0.35) !important;
-        border: 1px solid rgba(99, 102, 241, 0.6) !important;
-        border-radius: 6px !important;
-        color: #ffffff !important;
-        font-weight: 600 !important;
-    }
-
-    span[data-baseweb="tag"] span {
-        color: #ffffff !important;
     }
 
     /* Tabs Styling */
