@@ -685,7 +685,7 @@ ui_components.render_hero_stats(
 st.sidebar.markdown("""
 <div style="padding: 10px 0 16px 0; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 15px;">
     <div style="font-size: 1.15rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">⚡ BDP Control Center</div>
-    <div style="font-size: 0.76rem; color: #94a3b8; font-weight: 500;">Version 2.0 • Enterprise Edition</div>
+    <div style="font-size: 0.78rem; color: #cbd5e1; font-weight: 600;">Version 2.0 • Enterprise Edition</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -742,10 +742,10 @@ current_cfg = spark_tuning_manager.load_tuning_config()
 active_prof_disp = current_cfg.get("active_profile", "Heavy")
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"""
-<div class="glass-card-sm" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25);">
-    <div style="font-size: 0.72rem; text-transform: uppercase; color: #818cf8; font-weight: 700;">Active Tuning Profile</div>
-    <div style="font-size: 0.95rem; font-weight: 800; color: #ffffff; margin-top: 2px;">{active_prof_disp.split(' ')[0]}</div>
-    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">Dynamic Allocation: <b>{'Enabled' if current_cfg.get('params', {}).get('dynamic_allocation', True) else 'Disabled (Monolithic)'}</b></div>
+<div class="glass-card-sm" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.35);">
+    <div style="font-size: 0.75rem; text-transform: uppercase; color: #a5b4fc; font-weight: 700;">Active Tuning Profile</div>
+    <div style="font-size: 1.05rem; font-weight: 800; color: #ffffff; margin-top: 2px;">{active_prof_disp.split(' ')[0]}</div>
+    <div style="font-size: 0.80rem; color: #e2e8f0; margin-top: 4px;">Dynamic Allocation: <b style="color: #38bdf8;">{'Enabled' if current_cfg.get('params', {}).get('dynamic_allocation', True) else 'Disabled (Monolithic)'}</b></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -757,7 +757,7 @@ if menu == "📥 Data Ingestion & Partitioning":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📥 Data Ingestion, Dynamic Partitioning & Table Registration</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Ingest large datasets (up to 1,000 GB), auto-detect schemas, override column data types, configure dynamic partition keys, 
             and register high-speed <b>Delta Lake / Parquet tables</b> directly into <b>Hue & Hive Metastore</b>.
         </p>
@@ -1238,7 +1238,7 @@ elif menu == "⚡ Persistent SQL Studio & Tracer":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⚡ Persistent Spark SQL Studio & Live DAG Tracer</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Execute heavy analytical queries asynchronously across the distributed Spark cluster. 
             Queries run decoupled in the background and <b>survive browser hard-refreshes (<code>Ctrl+F5</code>), tab closures, and network drops</b>.
         </p>
@@ -1438,7 +1438,7 @@ elif menu == "⚙️ Spark Tuning & Cluster Scaling":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⚙️ Spark Dynamic Tuning & Elastic Worker Node Scaling</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Scale worker fleet horizontally on-demand, fine-tune JVM heap allocations, CPU cores, shuffle partition counts, 
             and Dynamic Resource Allocation (DRA) to guarantee zero-OOM execution across multi-billion-row workloads.
         </p>
@@ -1624,7 +1624,7 @@ elif menu == "🗄️ Metastore Table Explorer":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🗄️ Hive Metastore Catalog & Interactive Table Inspector</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Browse databases, inspect schemas, query partition distributions, and load interactive data grids with instant CSV export.
         </p>
     </div>
@@ -1710,7 +1710,7 @@ elif menu == "📦 Table Backup & Restore":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📦 Enterprise Table & Full Database Disaster Recovery</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Take bit-for-bit verified backups of single tables or entire databases with SHA-256 integrity checksums to guarantee zero data corruption.
         </p>
     </div>
@@ -1791,7 +1791,7 @@ elif menu == "⏳ Delta Time-Travel & Maintenance":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⏳ Delta Lake Time-Travel, Z-Ordering & VACUUM Maintenance</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Inspect transaction history, query historical snapshots (<code>VERSION AS OF</code>), execute 1-click in-place rollbacks, 
             and trigger <b>Z-Order Compaction (<code>OPTIMIZE</code>)</b> and <b>Storage Vacuuming</b>.
         </p>
@@ -1852,7 +1852,7 @@ elif menu == "⏰ Scheduled Ingestion Jobs":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⏰ Recurring Batch Ingestion & Folder Watchers</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Automate recurring batch pipelines to monitor directories and append delta updates into Hive tables.
         </p>
     </div>
@@ -1908,7 +1908,7 @@ elif menu == "📊 Cluster Health & Links":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📊 BDP Cluster Health & Infrastructure Topology</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Real-time health status, endpoints, and telemetry for all distributed Big Data containers.
         </p>
     </div>
@@ -1928,7 +1928,7 @@ elif menu == "📜 Container Logs Viewer":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📜 Real-Time Container Log Streamer</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Inspect live stdout and stderr streams directly from any cluster service container.
         </p>
     </div>
@@ -1954,7 +1954,7 @@ elif menu == "🧹 One-Click Cleanup":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🧹 One-Click Cluster State & Memory Purge</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Instantly terminate orphaned Livy sessions, clear idle PostgreSQL metastore connections, and self-heal HDFS missing blocks.
         </p>
     </div>
@@ -1975,7 +1975,7 @@ elif menu == "🔍 Cluster Diagnostics":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🔍 Automated Multi-Port Cluster Network Diagnostics</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Perform full-mesh port connectivity probing across Spark Master, Workers 1-4, Livy, NameNode, YARN, MinIO, and HiveServer2.
         </p>
     </div>
@@ -1994,7 +1994,7 @@ elif menu == "📚 Platform Docs & Guide Center":
     st.markdown("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📚 Big Data Platform Documentation & Feature Catalog</h2>
-        <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 0.88rem;">
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
             Architecture guides, connection strings, tuning formulas, and disaster recovery blueprints.
         </p>
     </div>
