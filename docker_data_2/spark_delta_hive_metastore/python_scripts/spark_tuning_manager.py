@@ -140,7 +140,14 @@ def update_spark_defaults_conf(params):
                     "spark.sql.adaptive.enabled": "true" if params.get("aqe_enabled", True) else "false",
                     "spark.sql.adaptive.coalescePartitions.enabled": "true" if params.get("aqe_coalesce", True) else "false",
                     "spark.memory.fraction": str(params.get("memory_fraction", 0.7)),
-                    "spark.memory.storageFraction": str(params.get("storage_fraction", 0.5))
+                    "spark.memory.storageFraction": str(params.get("storage_fraction", 0.5)),
+                    "spark.network.timeout": "800s",
+                    "spark.executor.heartbeatInterval": "60s",
+                    "spark.sql.broadcastTimeout": "1800",
+                    "spark.rpc.askTimeout": "800s",
+                    "spark.rpc.lookupTimeout": "800s",
+                    "spark.core.connection.ack.wait.timeout": "800s",
+                    "spark.storage.blockManagerSlaveTimeoutMs": "800000"
                 }
                 
                 updated_lines = []
@@ -192,7 +199,13 @@ def update_livy_conf(params):
                     "livy.spark.driver.memory": drv_mem,
                     "livy.rsc.driver-memory": drv_mem,
                     "livy.rsc.executor-memory": exe_mem,
-                    "livy.rsc.executor-cores": exe_cores
+                    "livy.rsc.executor-cores": exe_cores,
+                    "livy.server.session.timeout": "2h",
+                    "livy.spark.network.timeout": "800s",
+                    "livy.spark.executor.heartbeatInterval": "60s",
+                    "livy.spark.sql.broadcastTimeout": "1800",
+                    "livy.rsc.server.idle_timeout": "2h",
+                    "livy.rsc.client.connect.timeout": "120s"
                 }
                 
                 updated_lines = []
