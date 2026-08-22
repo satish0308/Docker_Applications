@@ -706,12 +706,12 @@ ui_components.render_hero_stats(
 # -------------------------------------------------------------
 # SIDEBAR NAVIGATION (Modern Categorized Hub)
 # -------------------------------------------------------------
-st.sidebar.markdown("""
+ui_components.render_html("""
 <div style="padding: 10px 0 16px 0; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 15px;">
     <div style="font-size: 1.15rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">⚡ BDP Control Center</div>
     <div style="font-size: 0.78rem; color: #cbd5e1; font-weight: 600;">Version 2.0 • Enterprise Edition</div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
 nav_section = st.sidebar.selectbox(
     "Select Suite:",
@@ -765,20 +765,20 @@ else:
 current_cfg = spark_tuning_manager.load_tuning_config()
 active_prof_disp = current_cfg.get("active_profile", "Heavy")
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"""
+ui_components.render_html(f"""
 <div class="glass-card-sm" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.35);">
     <div style="font-size: 0.75rem; text-transform: uppercase; color: #a5b4fc; font-weight: 700;">Active Tuning Profile</div>
     <div style="font-size: 1.05rem; font-weight: 800; color: #ffffff; margin-top: 2px;">{active_prof_disp.split(' ')[0]}</div>
     <div style="font-size: 0.80rem; color: #e2e8f0; margin-top: 4px;">Dynamic Allocation: <b style="color: #38bdf8;">{'Enabled' if current_cfg.get('params', {}).get('dynamic_allocation', True) else 'Disabled (Monolithic)'}</b></div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
 
 # =============================================================
 # MODULE 1: DATA INGESTION & PARTITIONING
 # =============================================================
 if menu == "📥 Data Ingestion & Partitioning":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📥 Data Ingestion, Dynamic Partitioning & Table Registration</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -786,7 +786,7 @@ if menu == "📥 Data Ingestion & Partitioning":
             and register high-speed <b>Delta Lake / Parquet tables</b> directly into <b>Hue & Hive Metastore</b>.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     # Ingestion Status & Job Tracker
     all_persistent_jobs = load_ingestion_jobs()
@@ -794,21 +794,21 @@ if menu == "📥 Data Ingestion & Partitioning":
     
     if active_jobs:
         curr_j = active_jobs[0]
-        st.markdown(f"""
+        ui_components.render_html(f"""
         <div class="glass-card" style="border-left: 4px solid #6366f1;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <div class="badge-info">Active Ingestion In Progress</div>
                     <h3 style="margin: 6px 0; font-size: 1.15rem; color: #ffffff;">Target: <code>{curr_j.get('target_db')}.{curr_j.get('target_table')}</code></h3>
-                    <p style="margin: 0; color: #94a3b8; font-size: 0.84rem;">{curr_j.get('current_batch_msg', 'Processing micro-batches in Spark cluster...')}</p>
+                    <p style="margin: 0; color: #cbd5e1; font-size: 0.84rem;">{curr_j.get('current_batch_msg', 'Processing micro-batches in Spark cluster...')}</p>
                 </div>
                 <div style="text-align: right;">
                     <div style="font-size: 1.3rem; font-weight: 800; color: #38bdf8; font-family: monospace;">Chunk {curr_j.get('current_chunk', 1)} / {curr_j.get('total_chunks', 1)}</div>
-                    <div style="font-size: 0.78rem; color: #64748b;">Started: {curr_j.get('started_at')}</div>
+                    <div style="font-size: 0.78rem; color: #94a3b8;">Started: {curr_j.get('started_at')}</div>
                 </div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """)
         st.progress(curr_j.get('progress_pct', 10))
         
         col_act_a, col_act_b = st.columns([1, 4])
@@ -1259,7 +1259,7 @@ spark.stop()
 # MODULE 2: PERSISTENT SQL STUDIO & TRACER
 # =============================================================
 elif menu == "⚡ Persistent SQL Studio & Tracer":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⚡ Persistent Spark SQL Studio & Live DAG Tracer</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1276,17 +1276,17 @@ elif menu == "⚡ Persistent SQL Studio & Tracer":
         st.markdown('<div class="section-title">🏃‍♂️ Active Queries In Flight</div>', unsafe_allow_html=True)
         for r_job in running_sql_jobs:
             q_id = r_job.get("query_id")
-            st.markdown(f"""
+            ui_components.render_html(f"""
             <div class="glass-card" style="border-left: 4px solid #38bdf8;">
                 <div style="display: flex; justify-content: space-between;">
                     <div>
                         <div class="badge-warning">RUNNING IN SPARK CLUSTER</div>
                         <h4 style="margin: 6px 0 2px 0; color: #ffffff;">Query ID: <code>{q_id}</code></h4>
-                        <div style="font-size: 0.78rem; color: #64748b;">Submitted at {r_job.get('submitted_at')}</div>
+                        <div style="font-size: 0.78rem; color: #94a3b8;">Submitted at {r_job.get('submitted_at')}</div>
                     </div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
             col_c1, col_c2 = st.columns([1, 4])
             with col_c1:
                 if st.button("🔄 Check Live Status", key=f"ref_{q_id}"):
@@ -1459,7 +1459,7 @@ elif menu == "⚡ Persistent SQL Studio & Tracer":
 # MODULE 3: SPARK TUNING & CLUSTER SCALING
 # =============================================================
 elif menu == "⚙️ Spark Tuning & Cluster Scaling":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⚙️ Spark Dynamic Tuning & Elastic Worker Node Scaling</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1645,7 +1645,7 @@ elif menu == "⚙️ Spark Tuning & Cluster Scaling":
 # MODULE 4: METASTORE TABLE EXPLORER
 # =============================================================
 elif menu == "🗄️ Metastore Table Explorer":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🗄️ Hive Metastore Catalog & Interactive Table Inspector</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1731,7 +1731,7 @@ elif menu == "🗄️ Metastore Table Explorer":
 # MODULE 5: TABLE BACKUP & DISASTER RECOVERY
 # =============================================================
 elif menu == "📦 Table Backup & Restore":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📦 Enterprise Table & Full Database Disaster Recovery</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1812,7 +1812,7 @@ elif menu == "📦 Table Backup & Restore":
 # MODULE 6: DELTA TIME-TRAVEL & MAINTENANCE
 # =============================================================
 elif menu == "⏳ Delta Time-Travel & Maintenance":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⏳ Delta Lake Time-Travel, Z-Ordering & VACUUM Maintenance</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1873,7 +1873,7 @@ elif menu == "⏳ Delta Time-Travel & Maintenance":
 # MODULE 7: SCHEDULED INGESTION JOBS
 # =============================================================
 elif menu == "⏰ Scheduled Ingestion Jobs":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">⏰ Recurring Batch Ingestion & Folder Watchers</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1929,7 +1929,7 @@ elif menu == "⏰ Scheduled Ingestion Jobs":
 # MODULE 8: CLUSTER HEALTH & TOPOLOGIES
 # =============================================================
 elif menu == "📊 Cluster Health & Links":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📊 BDP Cluster Health & Infrastructure Topology</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1949,7 +1949,7 @@ elif menu == "📊 Cluster Health & Links":
 # MODULE 9: CONTAINER LOGS STREAMER
 # =============================================================
 elif menu == "📜 Container Logs Viewer":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📜 Real-Time Container Log Streamer</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1975,7 +1975,7 @@ elif menu == "📜 Container Logs Viewer":
 # MODULE 10: ONE-CLICK STATE PURGE
 # =============================================================
 elif menu == "🧹 One-Click Cleanup":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🧹 One-Click Cluster State & Memory Purge</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -1996,7 +1996,7 @@ elif menu == "🧹 One-Click Cleanup":
 # MODULE 11: CLUSTER DIAGNOSTICS
 # =============================================================
 elif menu == "🔍 Cluster Diagnostics":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🔍 Automated Multi-Port Cluster Network Diagnostics</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
@@ -2015,7 +2015,7 @@ elif menu == "🔍 Cluster Diagnostics":
 # MODULE 12: PLATFORM DOCS & GUIDE CENTER
 # =============================================================
 elif menu == "📚 Platform Docs & Guide Center":
-    st.markdown("""
+    ui_components.render_html("""
     <div class="glass-card">
         <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">📚 Big Data Platform Documentation & Feature Catalog</h2>
         <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">

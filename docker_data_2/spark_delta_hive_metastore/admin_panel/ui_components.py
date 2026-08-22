@@ -4,6 +4,11 @@ Provides modern glassmorphism, responsive cards, neon status pills, executive he
 """
 
 import streamlit as st
+import textwrap
+
+def render_html(html_str):
+    """Renders HTML safely in Streamlit without markdown whitespace codeblock artifacts."""
+    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
 
 def inject_v2_theme():
     """Injects the modern, luxury SaaS enterprise dark theme CSS with crystal-clear contrast."""
@@ -552,94 +557,21 @@ def inject_v2_theme():
 def render_top_header(is_healthy=True, down_services=None):
     """Renders the executive master header with dynamic cluster heartbeat and live stats."""
     if is_healthy:
-        pulse_badge = """
-        <div class="pulse-live">
-            <div class="pulse-dot"></div>
-            Cluster Status: Online
-        </div>
-        """
+        pulse_badge = '<div class="pulse-live"><div class="pulse-dot"></div>Cluster Status: Online</div>'
     else:
         down_count = len(down_services) if down_services else 1
         down_summary = ", ".join(down_services[:2]) + ("..." if down_services and len(down_services) > 2 else "") if down_services else "Service Down"
-        pulse_badge = f"""
-        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(244, 63, 94, 0.2); border: 1px solid rgba(244, 63, 94, 0.6); border-radius: 9999px; color: #fb7185; font-size: 0.80rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;">
-            <div style="width: 8px; height: 8px; border-radius: 50%; background-color: #f43f5e; box-shadow: 0 0 12px #f43f5e; animation: pulse-glow 1.2s infinite;"></div>
-            Server Unhealthy ({down_count} Down: {down_summary})
-        </div>
-        """
+        pulse_badge = f'<div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(244, 63, 94, 0.2); border: 1px solid rgba(244, 63, 94, 0.6); border-radius: 9999px; color: #fb7185; font-size: 0.80rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;"><div style="width: 8px; height: 8px; border-radius: 50%; background-color: #f43f5e; box-shadow: 0 0 12px #f43f5e; animation: pulse-glow 1.2s infinite;"></div>Server Unhealthy ({down_count} Down: {down_summary})</div>'
 
-    header_html = f"""
-    <div class="exec-header">
-        <div class="header-title-box">
-            <div class="logo-badge">⚡</div>
-            <div class="header-text">
-                <h1>BDP Enterprise Platform Studio & Control Engine</h1>
-                <p>Apache Spark 3.5.0 • Delta Lake 3.2.0 • Hive Metastore • YARN 3.4.0 • MinIO S3</p>
-            </div>
-        </div>
-        <div>
-            {pulse_badge}
-        </div>
-    </div>
-    """
+    header_html = f'''<div class="exec-header"><div class="header-title-box"><div class="logo-badge">⚡</div><div class="header-text"><h1 style="margin:0; font-size:1.55rem; font-weight:800; color:#ffffff;">BDP Enterprise Platform Studio & Control Engine</h1><p style="margin:3px 0 0 0; color:#cbd5e1; font-size:0.86rem;">Apache Spark 3.5.0 • Delta Lake 3.2.0 • Hive Metastore • YARN 3.4.0 • MinIO S3</p></div></div><div>{pulse_badge}</div></div>'''
     st.markdown(header_html, unsafe_allow_html=True)
 
 def render_portal_shortcuts():
     """Renders quick-launch link pills to Hue, Jupyter, MinIO, Keycloak, Spark, YARN."""
-    portals_html = """
-    <div class="portal-bar">
-        <a href="http://localhost:8888" target="_blank" class="portal-pill">
-            <span>🎨</span> Hue Studio (8888)
-        </a>
-        <a href="http://localhost:8889" target="_blank" class="portal-pill">
-            <span>📓</span> JupyterLab (8889)
-        </a>
-        <a href="http://localhost:9001" target="_blank" class="portal-pill">
-            <span>🪣</span> MinIO Console (9001)
-        </a>
-        <a href="http://localhost:8080" target="_blank" class="portal-pill">
-            <span>🔐</span> Keycloak IAM (8080)
-        </a>
-        <a href="http://localhost:8089" target="_blank" class="portal-pill">
-            <span>⚡</span> Spark Master UI (8089)
-        </a>
-        <a href="http://localhost:8088" target="_blank" class="portal-pill">
-            <span>🐘</span> YARN RM (8088)
-        </a>
-        <a href="http://localhost:4040" target="_blank" class="portal-pill">
-            <span>📊</span> Spark Driver Telemetry (4040)
-        </a>
-        <a href="http://localhost:18080" target="_blank" class="portal-pill">
-            <span>📜</span> Spark History (18080)
-        </a>
-    </div>
-    """
+    portals_html = '''<div class="portal-bar"><a href="http://localhost:8888" target="_blank" class="portal-pill"><span>🎨</span> Hue Studio (8888)</a><a href="http://localhost:8889" target="_blank" class="portal-pill"><span>📓</span> JupyterLab (8889)</a><a href="http://localhost:9001" target="_blank" class="portal-pill"><span>🪣</span> MinIO Console (9001)</a><a href="http://localhost:8080" target="_blank" class="portal-pill"><span>🔐</span> Keycloak IAM (8080)</a><a href="http://localhost:8089" target="_blank" class="portal-pill"><span>⚡</span> Spark Master UI (8089)</a><a href="http://localhost:8088" target="_blank" class="portal-pill"><span>🐘</span> YARN RM (8088)</a><a href="http://localhost:4040" target="_blank" class="portal-pill"><span>📊</span> Spark Telemetry (4040)</a><a href="http://localhost:18080" target="_blank" class="portal-pill"><span>📜</span> Spark History (18080)</a></div>'''
     st.markdown(portals_html, unsafe_allow_html=True)
 
 def render_hero_stats(active_workers=2, total_cores=12, total_memory="20 GB", tables_count=12, active_jobs=0):
     """Renders the 4-column executive metrics bar."""
-    stats_html = f"""
-    <div class="metric-grid">
-        <div class="stat-box" style="--accent-color: #6366f1;">
-            <div class="stat-label">Compute Capacity</div>
-            <div class="stat-value">{total_cores} Cores</div>
-            <div class="stat-sub">⚡ {active_workers} Active Worker Nodes</div>
-        </div>
-        <div class="stat-box" style="--accent-color: #06b6d4;">
-            <div class="stat-label">Cluster Memory</div>
-            <div class="stat-value">{total_memory}</div>
-            <div class="stat-sub">🧠 Dedicated High-Speed RAM</div>
-        </div>
-        <div class="stat-box" style="--accent-color: #10b981;">
-            <div class="stat-label">Metastore Tables</div>
-            <div class="stat-value">{tables_count}</div>
-            <div class="stat-sub">📦 Delta Lake & Parquet Tables</div>
-        </div>
-        <div class="stat-box" style="--accent-color: #f59e0b;">
-            <div class="stat-label">Active Workloads</div>
-            <div class="stat-value">{active_jobs} Running</div>
-            <div class="stat-sub">🔄 Ingestions & SQL Pipelines</div>
-        </div>
-    </div>
-    """
+    stats_html = f'''<div class="metric-grid"><div class="stat-box" style="--accent-color: #6366f1;"><div class="stat-label">Compute Capacity</div><div class="stat-value">{total_cores} Cores</div><div class="stat-sub">⚡ {active_workers} Active Worker Nodes</div></div><div class="stat-box" style="--accent-color: #06b6d4;"><div class="stat-label">Cluster Memory</div><div class="stat-value">{total_memory}</div><div class="stat-sub">🧠 Dedicated High-Speed RAM</div></div><div class="stat-box" style="--accent-color: #10b981;"><div class="stat-label">Metastore Tables</div><div class="stat-value">{tables_count}</div><div class="stat-sub">📦 Delta Lake & Parquet Tables</div></div><div class="stat-box" style="--accent-color: #f59e0b;"><div class="stat-label">Active Workloads</div><div class="stat-value">{active_jobs} Running</div><div class="stat-sub">🔄 Ingestions & SQL Pipelines</div></div></div>'''
     st.markdown(stats_html, unsafe_allow_html=True)
