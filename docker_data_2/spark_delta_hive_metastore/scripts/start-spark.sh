@@ -14,8 +14,12 @@ if [ ! -d "$SPARK_HOME" ]; then
     exit 1
 fi
 
-# Start Spark Master
+# Start Spark Master and History Server
 if [ "$SPARK_MODE" == "master" ]; then
+    mkdir -p /opt/spark/event_logs
+    echo "Starting Spark History Server on port 18080 in background..."
+    $SPARK_HOME/bin/spark-class org.apache.spark.deploy.history.HistoryServer &
+    
     echo "Starting Spark Master on host spark:7077..."
     exec $SPARK_HOME/bin/spark-class org.apache.spark.deploy.master.Master \
         --host spark \
