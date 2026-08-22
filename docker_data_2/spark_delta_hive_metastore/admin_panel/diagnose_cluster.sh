@@ -50,6 +50,8 @@ except Exception as e:
 "
 
 check_service "Apache Livy" "livy" 8998
+check_service "Spark History Server" "spark" 18080
+check_service "Spark Thrift Server" "spark-thriftserver" 10000
 check_service "MinIO S3 API" "minio" 9000
 check_service "MinIO Console" "minio" 9001
 check_service "HiveServer2" "hive-server" 10000

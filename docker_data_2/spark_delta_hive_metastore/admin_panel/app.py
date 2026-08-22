@@ -658,9 +658,33 @@ def execute_restore_job(backup_id, mode="table", target_db="default", target_tab
     return res.output.decode('utf-8', errors='ignore'), res.exit_code
 
 # -------------------------------------------------------------
-# EXECUTIVE TOP HEADER & HERO METRICS
+# DYNAMIC CLUSTER HEALTH PROBE & EXECUTIVE TOP HEADER
 # -------------------------------------------------------------
-ui_components.render_top_header()
+ESSENTIAL_CONTAINERS = [
+    "namenode", "datanode", "hive-server", "spark", "spark-worker",
+    "resourcemanager", "nodemanager", "minio", "livy",
+    "hive-metastore-postgres", "keycloak", "spark-thriftserver"
+]
+
+all_containers_live = client.containers.list(all=True)
+down_services_list = []
+
+for svc_name in ESSENTIAL_CONTAINERS:
+    matching = [c for c in all_containers_live if svc_name in c.name]
+    if not matching:
+        down_services_list.append(svc_name)
+    else:
+        for c in matching:
+            if c.status != "running":
+                down_services_list.append(c.name)
+            else:
+                health_stat = c.attrs.get('State', {}).get('Health', {}).get('Status')
+                if health_stat in ['unhealthy', 'dead']:
+                    down_services_list.append(f"{c.name} (unhealthy)")
+
+is_cluster_healthy = (len(down_services_list) == 0)
+
+ui_components.render_top_header(is_healthy=is_cluster_healthy, down_services=down_services_list)
 ui_components.render_portal_shortcuts()
 
 # Fetch Cluster Telemetry for Hero Stats

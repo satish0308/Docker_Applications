@@ -549,9 +549,26 @@ def inject_v2_theme():
     """
     st.markdown(custom_css, unsafe_allow_html=True)
 
-def render_top_header():
-    """Renders the executive master header with cluster heartbeat and live stats."""
-    header_html = """
+def render_top_header(is_healthy=True, down_services=None):
+    """Renders the executive master header with dynamic cluster heartbeat and live stats."""
+    if is_healthy:
+        pulse_badge = """
+        <div class="pulse-live">
+            <div class="pulse-dot"></div>
+            Cluster Status: Online
+        </div>
+        """
+    else:
+        down_count = len(down_services) if down_services else 1
+        down_summary = ", ".join(down_services[:2]) + ("..." if down_services and len(down_services) > 2 else "") if down_services else "Service Down"
+        pulse_badge = f"""
+        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(244, 63, 94, 0.2); border: 1px solid rgba(244, 63, 94, 0.6); border-radius: 9999px; color: #fb7185; font-size: 0.80rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background-color: #f43f5e; box-shadow: 0 0 12px #f43f5e; animation: pulse-glow 1.2s infinite;"></div>
+            Server Unhealthy ({down_count} Down: {down_summary})
+        </div>
+        """
+
+    header_html = f"""
     <div class="exec-header">
         <div class="header-title-box">
             <div class="logo-badge">⚡</div>
@@ -561,10 +578,7 @@ def render_top_header():
             </div>
         </div>
         <div>
-            <div class="pulse-live">
-                <div class="pulse-dot"></div>
-                Cluster Status: Online
-            </div>
+            {pulse_badge}
         </div>
     </div>
     """
