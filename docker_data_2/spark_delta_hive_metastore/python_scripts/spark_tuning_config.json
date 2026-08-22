@@ -5,7 +5,7 @@
     "executor_memory": "10g",
     "executor_cores": 10,
     "max_cores": 12,
-    "dynamic_allocation": false,
+    "dynamic_allocation": true,
     "shuffle_partitions": 300,
     "aqe_enabled": true,
     "aqe_coalesce": true,
@@ -14,5 +14,10 @@
     "offheap_enabled": true,
     "offheap_size": "1g",
     "kryo_serializer": true
+  },
+  "worker_scaling": {
+    "worker_count": 1,
+    "worker_ram": "20g",
+    "worker_cores": 12
   }
 }
