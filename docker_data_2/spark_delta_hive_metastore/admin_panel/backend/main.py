@@ -1,0 +1,107 @@
+"""
+BDP Control Center FastAPI Master Application
+Serves REST APIs, WebSocket streaming hubs, and mounts compiled React 18 frontend static assets.
+"""
+
+import asyncio
+import os
+import docker
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+from backend.events_streamer import ws_manager, start_docker_event_listener
+from backend.routes_orchestrator import router as orchestrator_router
+from backend.routes_sql import router as sql_router
+from backend.routes_ingestion import router as ingestion_router
+from backend.routes_tuning import router as tuning_router
+from backend.routes_metastore import router as metastore_router
+from backend.routes_diagnostics import router as diagnostics_router
+
+app = FastAPI(
+    title="BDP Platform Studio • Enterprise SaaS Control Engine",
+    version="3.0.0",
+    description="React 18 + FastAPI + WebSockets Control Center for Spark, Delta Lake, Hive, and YARN."
+)
+
+# Enable CORS for local Vite development and Docker networking
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include All Functional API Routers
+app.include_router(orchestrator_router)
+app.include_router(sql_router)
+app.include_router(ingestion_router)
+app.include_router(tuning_router)
+app.include_router(metastore_router)
+app.include_router(diagnostics_router)
+
+@app.on_event("startup")
+async def startup_event():
+    """Starts background threads for Docker daemon event streaming."""
+    loop = asyncio.get_running_loop()
+    start_docker_event_listener(loop)
+
+@app.websocket("/api/ws/events")
+async def websocket_events_endpoint(websocket: WebSocket):
+    """Real-time bi-directional event stream for live cluster notifications."""
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            # Keep-alive heartbeat & client command receiver
+            data = await websocket.receive_text()
+            # Echo or process client events
+            await websocket.send_json({"type": "PONG", "received": data})
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+@app.websocket("/api/ws/logs/{container_name}")
+async def websocket_container_logs(websocket: WebSocket, container_name: str):
+    """Streams live line-by-line container logs directly to client terminal."""
+    await websocket.accept()
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        log_stream = container.logs(stream=True, follow=True, tail=100)
+        for chunk in log_stream:
+            await websocket.send_text(chunk.decode('utf-8', errors='ignore'))
+    except WebSocketDisconnect:
+        pass
+    except Exception as ex:
+        try:
+            await websocket.send_text(f"[Log Stream Error]: {ex}\n")
+        except Exception:
+            pass
+
+# -------------------------------------------------------------
+# FRONTEND STATIC ASSETS MOUNTING
+# -------------------------------------------------------------
+DIST_DIR = "/frontend_dist" if os.path.exists("/frontend_dist") else ("/app/dist" if os.path.exists("/app/dist") else os.path.abspath("frontend/dist"))
+
+if os.path.exists(DIST_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """Catches all non-API routes and returns index.html for client-side routing."""
+        file_path = os.path.join(DIST_DIR, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+else:
+    @app.get("/")
+    def root_fallback():
+        return {
+            "message": "BDP Control Center API is live (FastAPI + WebSockets). Frontend build in progress.",
+            "docs": "/docs",
+            "orchestrator": "/api/orchestrator/matrix",
+            "metastore": "/api/metastore/tables"
+        }
