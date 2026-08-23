@@ -12,12 +12,17 @@ import {
   Calendar, 
   FileCheck, 
   RefreshCw,
-  FolderArchive
+  FolderArchive,
+  Table as TableIcon
 } from 'lucide-react';
 
 export default function BackupRestore() {
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Metastore Catalog for Cascading Dropdowns
+  const [catalogTables, setCatalogTables] = useState([]);
+  const [databases, setDatabases] = useState(['default']);
 
   // Backup Form State
   const [backupMode, setBackupMode] = useState('table'); // 'table' | 'database'
@@ -35,9 +40,29 @@ export default function BackupRestore() {
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreOutput, setRestoreOutput] = useState(null);
 
+  const fetchCatalog = async () => {
+    try {
+      const res = await fetch('/api/metastore/tables');
+      const data = await res.json();
+      const tblList = data.tables || [];
+      setCatalogTables(tblList);
+
+      const dbs = Array.from(new Set(tblList.map(t => t.database_name || t.Database || 'default')));
+      if (dbs.length > 0) {
+        setDatabases(dbs);
+        if (!dbs.includes(database)) {
+          setDatabase(dbs[0]);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load metastore catalog:", err);
+    }
+  };
+
   const fetchBackups = async () => {
     setLoading(true);
     try {
+      await fetchCatalog();
       const res = await fetch('/api/backup/list');
       const data = await res.json();
       setBackups(data.backups || []);
@@ -54,6 +79,17 @@ export default function BackupRestore() {
   useEffect(() => {
     fetchBackups();
   }, []);
+
+  // Tables filtered by chosen database
+  const tablesForDb = catalogTables
+    .filter(t => (t.database_name || t.Database || 'default') === database)
+    .map(t => t.table_name || t['Table Name']);
+
+  useEffect(() => {
+    if (tablesForDb.length > 0 && !tablesForDb.includes(table)) {
+      setTable(tablesForDb[0]);
+    }
+  }, [database, catalogTables]);
 
   const handleRunBackup = async () => {
     setBackupRunning(true);
@@ -162,27 +198,49 @@ export default function BackupRestore() {
             </button>
           </div>
 
-          {/* Database Input */}
+          {/* CASCADING DATABASE DROPDOWN */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-300">Database Name</label>
-            <input
-              type="text"
+            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-purple-400" />
+              Database Name
+            </label>
+            <select
               value={database}
               onChange={(e) => setDatabase(e.target.value)}
               className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
-            />
+            >
+              {databases.map(db => (
+                <option key={db} value={db} className="bg-slate-900">{db}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Table Input (if Single Table) */}
+          {/* CASCADING TABLE DROPDOWN (if Single Table) */}
           {backupMode === 'table' && (
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">Table Name</label>
-              <input
-                type="text"
-                value={table}
-                onChange={(e) => setTable(e.target.value)}
-                className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
-              />
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <TableIcon className="w-3.5 h-3.5 text-purple-400" />
+                Table Name
+              </label>
+              {tablesForDb.length > 0 ? (
+                <select
+                  value={table}
+                  onChange={(e) => setTable(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-purple-300 font-bold focus:outline-none focus:border-purple-500"
+                >
+                  {tablesForDb.map(tbl => (
+                    <option key={tbl} value={tbl} className="bg-slate-900">{tbl}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={table}
+                  onChange={(e) => setTable(e.target.value)}
+                  placeholder="e.g. sales"
+                  className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-purple-300 font-bold focus:outline-none focus:border-purple-500"
+                />
+              )}
             </div>
           )}
 
@@ -222,27 +280,48 @@ export default function BackupRestore() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-emerald-400" />
-                2. 1-Click Table / Database Restore
+                2. Restore from Backup
               </h3>
-              <span className="text-xs text-slate-400">Zero Downtime Disaster Recovery</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">Select Backup Snapshot Archive</label>
+              <select
+                value={selectedBackupId}
+                onChange={(e) => setSelectedBackupId(e.target.value)}
+                className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
+              >
+                {backups.length === 0 ? (
+                  <option value="">No backups available</option>
+                ) : (
+                  backups.map(b => (
+                    <option key={b.backup_id} value={b.backup_id}>
+                      {b.backup_id} ({b.table_name || b.database_name}) • {b.timestamp} • {b.size}
+                    </option>
+                  ))
+                )}
+              </select>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-300">Target Database</label>
-                <input
-                  type="text"
+                <select
                   value={targetDb}
                   onChange={(e) => setTargetDb(e.target.value)}
                   className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
-                />
+                >
+                  {databases.map(db => (
+                    <option key={db} value={db}>{db}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Target Table Name (Optional Clone)</label>
+                <label className="text-xs font-semibold text-slate-300">Target Table (Optional override)</label>
                 <input
                   type="text"
-                  placeholder="Leave empty for in-place restore"
+                  placeholder="e.g. sales_restored"
                   value={targetTable}
                   onChange={(e) => setTargetTable(e.target.value)}
                   className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
@@ -252,21 +331,23 @@ export default function BackupRestore() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">Storage Destination</label>
-              <input
-                type="text"
+              <select
                 value={storageDest}
                 onChange={(e) => setStorageDest(e.target.value)}
                 className="w-full bg-slate-900 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
-              />
+              >
+                <option value="s3a://warehouse/">MinIO S3 (s3a://warehouse/)</option>
+                <option value="hdfs://namenode:9000/user/hive/warehouse/">HDFS (hdfs://namenode:9000/user/hive/warehouse/)</option>
+              </select>
             </div>
 
             <button
               onClick={handleRunRestore}
-              disabled={restoreRunning || !selectedBackupId}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-90 text-white font-bold text-xs flex items-center gap-2 transition disabled:opacity-40 shadow-lg shadow-emerald-500/20"
+              disabled={restoreRunning || backups.length === 0}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-90 text-white font-bold text-xs flex items-center justify-center gap-2 transition disabled:opacity-40 shadow-lg shadow-emerald-500/20"
             >
               {restoreRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-              Restore `{selectedBackupId || 'Select a Backup'}`
+              Execute Table Restore
             </button>
 
             {restoreOutput && (
@@ -276,58 +357,39 @@ export default function BackupRestore() {
             )}
           </div>
 
-          {/* BACKUPS CATALOG LIST */}
+          {/* BACKUP ARCHIVES INVENTORY TABLE */}
           <div className="glass-card p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
-                <FolderArchive className="w-4 h-4 text-sky-400" />
-                Available Backups Catalog ({backups.length})
-              </h3>
-            </div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <FolderArchive className="w-4 h-4 text-purple-400" />
+              Verified Local Snapshot Archives ({backups.length})
+            </h3>
 
             {backups.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-white/5">
-                No backups found. Run a backup above to create your first snapshot.
+              <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/40 rounded-xl border border-white/5">
+                No backup archives found in <code>/backups/</code>.
               </div>
             ) : (
-              <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar">
-                {backups.map((b) => {
-                  const isSelected = selectedBackupId === b.backup_id;
-                  return (
-                    <div
-                      key={b.backup_id}
-                      onClick={() => setSelectedBackupId(b.backup_id)}
-                      className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-3 ${
-                        isSelected
-                          ? 'bg-purple-950/30 border-purple-500/50 shadow-md shadow-purple-500/10'
-                          : 'bg-slate-900/60 border-white/[0.08] hover:border-white/20'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="font-extrabold text-xs text-white truncate flex items-center gap-2">
-                          <span>{b.backup_id}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
-                            {b.backup_type || 'table'}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          Source: <span className="text-slate-300 font-mono">{b.source_table || b.source_database || 'N/A'}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 flex-shrink-0 text-right">
-                        <div className="hidden sm:block text-[11px] font-mono text-slate-400">
-                          <div>{b.total_rows != null ? `${b.total_rows.toLocaleString()} rows` : ''}</div>
-                          <div className="text-[10px] text-slate-500">{b.created_at || ''}</div>
-                        </div>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" />
-                          Verified
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="border border-white/10 rounded-xl bg-slate-950 overflow-hidden">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-slate-900 border-b border-white/10 text-slate-400">
+                    <tr>
+                      <th className="p-2.5">Backup ID</th>
+                      <th className="p-2.5">Target</th>
+                      <th className="p-2.5">Size</th>
+                      <th className="p-2.5">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-slate-300">
+                    {backups.map((b) => (
+                      <tr key={b.backup_id} className="hover:bg-white/[0.02]">
+                        <td className="p-2.5 font-bold text-white truncate max-w-xs">{b.backup_id}</td>
+                        <td className="p-2.5 text-purple-400">{b.database_name}.{b.table_name || '*'}</td>
+                        <td className="p-2.5 text-slate-400">{b.size}</td>
+                        <td className="p-2.5 text-slate-500">{b.timestamp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
