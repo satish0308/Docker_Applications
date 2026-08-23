@@ -1,0 +1,89 @@
+name: BDP Platform CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - bdp
+      - bdp-techstack
+  pull_request:
+    branches:
+      - main
+      - master
+      - bdp
+      - bdp-techstack
+
+jobs:
+  frontend-build-check:
+    name: 🎨 Frontend Build & Asset Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: admin_panel/frontend/package.json
+
+      - name: 📦 Install Frontend Dependencies
+        working-directory: ./admin_panel/frontend
+        run: npm install
+
+      - name: ⚡ Build React 18 Production Bundle (Vite)
+        working-directory: ./admin_panel/frontend
+        run: npm run build
+
+  backend-test-suite:
+    name: 🐍 Backend API & DAG Orchestrator Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r admin_panel/requirements.txt
+          pip install pytest pytest-cov httpx
+
+      - name: 🧪 Execute Pytest Test Suite & Coverage
+        run: |
+          pytest tests/ -v --tb=short
+
+  docker-image-smoke-test:
+    name: 🐳 Docker Multi-Stage Build & Smoke Probe
+    runs-on: ubuntu-latest
+    needs: [frontend-build-check, backend-test-suite]
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: 🏗️ Build Multi-Stage Control Center Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin_panel
+          file: ./admin_panel/Dockerfile
+          load: true
+          tags: bdp-control-center:ci-test
+
+      - name: 🚀 Run Smoke Container & Validate HTTP/WebSocket Endpoints
+        run: |
+          docker run -d --name test-admin-panel -p 8501:8501 bdp-control-center:ci-test
+          sleep 5
+          curl -f http://localhost:8501/ || exit 1
+          curl -f http://localhost:8501/api/orchestrator/matrix || exit 1
+          docker logs test-admin-panel
+          docker stop test-admin-panel
