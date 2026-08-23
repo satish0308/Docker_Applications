@@ -6,8 +6,9 @@ Manages dynamic lifecycle, topological dependency resolution, operational preset
 import docker
 import socket
 import time
+import os
 import subprocess
-from typing import Dict, List, Set, Tuple, Any
+from typing import Dict, List, Set, Tuple, Any, Optional
 
 # -------------------------------------------------------------
 # SERVICE REGISTRY & METADATA
@@ -293,6 +294,35 @@ def get_downstream_dependents(service_key: str, running_services: List[str]) -> 
     return list(dependents)
 
 # -------------------------------------------------------------
+# CONTAINER MATCHING HELPER
+# -------------------------------------------------------------
+def find_matching_container(client: docker.DockerClient, meta: Dict[str, Any]):
+    """Finds exact container matching service metadata from docker daemon."""
+    if not client:
+        return None
+    try:
+        all_containers = client.containers.list(all=True)
+    except Exception:
+        return None
+
+    for cont in all_containers:
+        cname = cont.name.lstrip("/")
+        labels = cont.labels or {}
+        compose_svc = labels.get("com.docker.compose.service", "")
+
+        if compose_svc and compose_svc == meta["compose_service"]:
+            return cont
+        if cname == meta["container"] or cname == meta["compose_service"]:
+            return cont
+        if cname.endswith(f"-{meta['compose_service']}-1") or cname.endswith(f"_{meta['compose_service']}_1"):
+            return cont
+        if cname.startswith(f"{meta['compose_service']}-"):
+            return cont
+        if meta["container"] in cname:
+            return cont
+    return None
+
+# -------------------------------------------------------------
 # DOCKER LIFECYCLE & STATUS INSPECTOR
 # -------------------------------------------------------------
 def get_service_status_matrix() -> List[Dict[str, Any]]:
@@ -302,22 +332,16 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
     matrix = []
     try:
         client = docker.from_env()
-        all_containers = {c.name: c for c in client.containers.list(all=True)}
     except Exception:
-        all_containers = {}
+        client = None
 
     for key, meta in SERVICE_REGISTRY.items():
-        matched_container = None
-        for cname, cont in all_containers.items():
-            if key == meta["compose_service"] or meta["container"] in cname or key in cname:
-                matched_container = cont
-                break
+        matched_container = find_matching_container(client, meta) if client else None
 
         is_running = False
         health_stat = "N/A"
         status_label = "STOPPED"
         uptime = "Off"
-        memory_usage = "0 MB"
 
         if matched_container:
             stat = matched_container.status.lower()
@@ -333,7 +357,7 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                 uptime = started[:19].replace("T", " ") if started else "Running"
             elif stat == "restarting":
                 status_label = "RESTARTING"
-            elif stat in ["exited", "dead"]:
+            elif stat in ["exited", "dead", "created"]:
                 status_label = "STOPPED"
 
         matrix.append({
@@ -355,9 +379,20 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
 
     return matrix
 
+def get_compose_base_cmd() -> List[str]:
+    """Returns the robust docker compose command with correct workspace context."""
+    cmd = ["docker", "compose"]
+    if os.path.exists("/workspace/docker-compose.yml"):
+        cmd.extend(["--project-directory", "/workspace", "-f", "/workspace/docker-compose.yml"])
+    elif os.path.exists("/app/docker-compose.yml"):
+        cmd.extend(["-f", "/app/docker-compose.yml"])
+    elif os.path.exists("docker-compose.yml"):
+        cmd.extend(["-f", "docker-compose.yml"])
+    return cmd
+
 def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
     """
-    Starts a list of services in topological dependency order and validates socket readiness.
+    Starts a list of services in topological dependency order and validates readiness.
     """
     resolved_order = resolve_dependencies(services)
     results = []
@@ -374,33 +409,46 @@ def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
         comp_name = meta["compose_service"]
         res_info = {"service": meta["name"], "key": svc_key, "status": "UNKNOWN", "msg": ""}
 
+        # 1. Check if container already exists and start it
+        matched = find_matching_container(client, meta)
+        if matched:
+            if matched.status.lower() == "running":
+                res_info["status"] = "RUNNING"
+                res_info["msg"] = "Already running."
+                results.append(res_info)
+                continue
+            else:
+                try:
+                    matched.start()
+                    res_info["status"] = "STARTED"
+                    res_info["msg"] = "Container started successfully."
+                    results.append(res_info)
+                    time.sleep(1)
+                    continue
+                except Exception as start_ex:
+                    res_info["msg"] = f"Direct start error: {start_ex}. Attempting compose..."
+
+        # 2. Fallback: docker compose up -d
         try:
-            # First try starting existing container or run compose
+            compose_cmd = get_compose_base_cmd() + ["up", "-d", comp_name]
             proc = subprocess.run(
-                ["docker", "compose", "up", "-d", comp_name],
-                cwd="/app" if socket.gethostname() == "admin-panel" else ".",
+                compose_cmd,
                 capture_output=True,
                 text=True,
                 timeout=120
             )
             if proc.returncode == 0:
                 res_info["status"] = "STARTED"
-                res_info["msg"] = f"Started successfully via Docker Compose."
+                res_info["msg"] = "Started via Docker Compose."
             else:
-                # Fallback to starting container directly if found
-                try:
-                    c = client.containers.get(meta["container"])
-                    c.start()
-                    res_info["status"] = "STARTED"
-                    res_info["msg"] = "Container started directly."
-                except Exception as inner_ex:
-                    res_info["status"] = "WARNING"
-                    res_info["msg"] = f"{proc.stderr.strip() or str(inner_ex)}"
+                res_info["status"] = "WARNING"
+                res_info["msg"] = proc.stderr.strip() or proc.stdout.strip()
         except Exception as ex:
             res_info["status"] = "FAILED"
             res_info["msg"] = str(ex)
 
         results.append(res_info)
+        time.sleep(1)
 
     return results
 
@@ -434,22 +482,16 @@ def stop_services_cascade(services: List[str], cascade: bool = True) -> List[Dic
 
         res_info = {"service": meta["name"], "key": svc_key, "status": "UNKNOWN", "msg": ""}
         try:
-            # Stop container
-            matching = [c for c in client.containers.list() if meta["compose_service"] in c.name or meta["container"] in c.name]
-            if matching:
-                for c in matching:
-                    c.stop(timeout=10)
+            matched = find_matching_container(client, meta)
+            if matched and matched.status.lower() == "running":
+                matched.stop(timeout=10)
                 res_info["status"] = "STOPPED"
-                res_info["msg"] = f"Container(s) stopped gracefully."
+                res_info["msg"] = "Container stopped gracefully."
             else:
-                subprocess.run(
-                    ["docker", "compose", "stop", meta["compose_service"]],
-                    cwd="/app" if socket.gethostname() == "admin-panel" else ".",
-                    capture_output=True,
-                    timeout=30
-                )
+                compose_cmd = get_compose_base_cmd() + ["stop", meta["compose_service"]]
+                subprocess.run(compose_cmd, capture_output=True, timeout=30)
                 res_info["status"] = "STOPPED"
-                res_info["msg"] = f"Service stopped."
+                res_info["msg"] = "Service stopped."
         except Exception as ex:
             res_info["status"] = "FAILED"
             res_info["msg"] = str(ex)
@@ -465,15 +507,14 @@ def restart_single_service(service_key: str) -> Tuple[bool, str]:
         return False, "Unknown service."
     try:
         client = docker.from_env()
-        matching = [c for c in client.containers.list(all=True) if meta["compose_service"] in c.name or meta["container"] in c.name]
-        if matching:
-            for c in matching:
-                c.restart(timeout=10)
+        matched = find_matching_container(client, meta)
+        if matched:
+            matched.restart(timeout=10)
             return True, f"Restarted `{meta['name']}` successfully."
         else:
+            compose_cmd = get_compose_base_cmd() + ["restart", meta["compose_service"]]
             proc = subprocess.run(
-                ["docker", "compose", "restart", meta["compose_service"]],
-                cwd="/app" if socket.gethostname() == "admin-panel" else ".",
+                compose_cmd,
                 capture_output=True,
                 text=True,
                 timeout=60

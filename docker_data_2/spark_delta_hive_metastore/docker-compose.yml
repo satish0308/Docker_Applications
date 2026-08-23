@@ -333,6 +333,8 @@ services:
       - ./hue:/app/hue
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+      - .:/workspace:ro
       - ./backups:/backups
       - ./data:/data
     networks:
