@@ -478,8 +478,17 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
           </div>
         </div>
 
+        {/* Table Header */}
+        <div className="hidden lg:grid grid-cols-12 items-center px-4 py-2.5 rounded-xl bg-slate-950/80 border border-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+          <div className="col-span-5">Service & Details</div>
+          <div className="col-span-2">Container & Tier</div>
+          <div className="col-span-2">Live Status</div>
+          <div className="col-span-1">Port / RAM</div>
+          <div className="col-span-2 text-right">Lifecycle Actions</div>
+        </div>
+
         {/* Containers List */}
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           {filteredServices.map(svc => {
             const isRunning = svc.status === "RUNNING";
             const isUnhealthy = svc.status === "UNHEALTHY";
@@ -487,51 +496,55 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
             return (
               <div
                 key={svc.key}
-                className="p-4 rounded-xl bg-slate-900/60 border border-white/[0.08] hover:border-white/15 transition flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4"
+                className="grid grid-cols-1 lg:grid-cols-12 items-center gap-3.5 p-3.5 rounded-xl bg-slate-900/60 border border-white/[0.08] hover:border-white/20 transition hover:bg-slate-900/90"
               >
-                {/* Info */}
-                <div className="flex items-center gap-3.5 min-w-[320px]">
+                {/* Column 1: Service Info (col-span-5) */}
+                <div className="lg:col-span-5 flex items-center gap-3 min-w-0">
                   <div className="text-2xl p-2 rounded-xl bg-slate-800/80 border border-white/10 flex-shrink-0">
                     {svc.icon}
                   </div>
-                  <div>
-                    <div className="font-extrabold text-sm text-white flex items-center gap-2">
-                      {svc.name}
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-white/5">
-                        {svc.compose_service}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-400 mt-0.5 max-w-xl line-clamp-1">{svc.desc}</div>
+                  <div className="min-w-0">
+                    <div className="font-extrabold text-sm text-white truncate">{svc.name}</div>
+                    <div className="text-xs text-slate-400 truncate">{svc.desc}</div>
                   </div>
                 </div>
 
-                {/* Specs & Live Badge */}
-                <div className="flex items-center gap-4 text-xs font-medium">
-                  <div>
-                    <span className={`px-2.5 py-1 rounded-full border text-[11px] font-bold ${
-                      isRunning 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-sm shadow-emerald-500/10'
-                        : isUnhealthy
-                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                        : 'bg-slate-800 border-white/10 text-slate-400'
-                    }`}>
-                      {svc.status}
-                    </span>
-                  </div>
-                  <div className="text-slate-400 font-mono">
-                    Port: <span className="text-white font-bold">{svc.port}</span>
-                  </div>
-                  <div className="text-slate-400 font-mono">
-                    RAM: <span className="text-white font-bold">{svc.est_ram}</span>
-                  </div>
+                {/* Column 2: Container & Tier (col-span-2) */}
+                <div className="lg:col-span-2 flex flex-col gap-0.5 min-w-0">
+                  <span className="text-xs font-mono font-bold text-slate-300 truncate">
+                    {svc.compose_service}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-medium truncate">
+                    {svc.tier}
+                  </span>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Column 3: Live Status Badge (col-span-2) */}
+                <div className="lg:col-span-2 flex items-center">
+                  <span className={`px-2.5 py-1 rounded-full border text-[11px] font-bold inline-flex items-center gap-1.5 ${
+                    isRunning 
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-sm shadow-emerald-500/10'
+                      : isUnhealthy
+                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                      : 'bg-slate-800/80 border-white/10 text-slate-400'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-400' : isUnhealthy ? 'bg-rose-400' : 'bg-slate-500'}`}></span>
+                    {svc.status}
+                  </span>
+                </div>
+
+                {/* Column 4: Port & RAM (col-span-1) */}
+                <div className="lg:col-span-1 flex flex-col font-mono text-[11px]">
+                  <span className="text-slate-300 font-bold">{svc.port}</span>
+                  <span className="text-slate-500 text-[10px]">{svc.est_ram}</span>
+                </div>
+
+                {/* Column 5: Action Buttons (col-span-2 text-right) */}
+                <div className="lg:col-span-2 flex items-center justify-start lg:justify-end gap-1.5">
                   <button
                     onClick={() => runStreamingPipeline('/api/orchestrator/stream-start', { services: [svc.key] }, `Start: ${svc.name}`)}
                     disabled={isRunning}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-40"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1 transition disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <Play className="w-3 h-3 fill-current" />
                     Start
@@ -539,7 +552,7 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                   <button
                     onClick={() => runStreamingPipeline('/api/orchestrator/stream-stop', { services: [svc.key], cascade: false }, `Stop: ${svc.name}`)}
                     disabled={!isRunning}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/30 border border-white/10 hover:border-rose-500/30 text-slate-400 hover:text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition disabled:opacity-40"
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/30 border border-white/10 hover:border-rose-500/30 text-slate-400 hover:text-rose-300 font-semibold text-xs flex items-center gap-1 transition disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <Square className="w-3 h-3 fill-current" />
                     Stop
@@ -547,7 +560,7 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                   <button
                     onClick={() => handleRestartService(svc.key)}
                     disabled={!isRunning}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-400 hover:text-white transition disabled:opacity-40"
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-400 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Restart Container"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
