@@ -48,7 +48,7 @@ export default function DataIngestion() {
   const [chunkSize, setChunkSize] = useState(25);
   
   // Partition Columns (Multi-Select Array)
-  const [selectedPartitions, setSelectedPartitions] = useState(['season']);
+  const [selectedPartitions, setSelectedPartitions] = useState([]);
   const [isPartitionDropdownOpen, setIsPartitionDropdownOpen] = useState(false);
   const [customPartitionInput, setCustomPartitionInput] = useState('');
 
@@ -77,6 +77,8 @@ export default function DataIngestion() {
       const data = await res.json();
       const cols = data.columns || [];
       setAvailableColumns(cols);
+      // Clean up any selected partitions that don't exist in the new dataset
+      setSelectedPartitions(prev => prev.filter(col => cols.includes(col)));
     } catch (err) {
       console.error("Failed to load dataset columns:", err);
     }
@@ -128,6 +130,7 @@ export default function DataIngestion() {
     setSelectedDataset(name);
     const cleanName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
     setTargetTable(cleanName);
+    setSelectedPartitions([]);
     fetchDatasetColumns(name);
   };
 
