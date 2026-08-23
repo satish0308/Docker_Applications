@@ -16,9 +16,10 @@ from backend import routes_cleanup
 client = TestClient(app)
 
 def test_cleanup_routes_registered():
-    """Validates that cleanup purge endpoint is registered."""
+    """Validates that cleanup purge and clean-run endpoints are registered."""
     routes = [r.path for r in routes_cleanup.router.routes]
     assert "/purge" in routes or "/api/cleanup/purge" in routes
+    assert "/clean-run" in routes or "/api/cleanup/clean-run" in routes
 
 def test_execute_purge_endpoint(monkeypatch):
     """Validates that purge endpoint executes garbage collection safely."""

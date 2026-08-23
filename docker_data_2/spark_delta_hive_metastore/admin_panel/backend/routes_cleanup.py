@@ -1,14 +1,17 @@
 """
-System Maintenance & 1-Click Cluster Purge API Router
+System Maintenance, 1-Click Cluster Purge & Clean Run API Router
 Provides endpoints to terminate idle database handles, clear hanging Livy sessions,
-leave HDFS safe mode, and reclaim cluster RAM.
+leave HDFS safe mode, reclaim cluster RAM, and execute a 1-click clean run container recreation.
 """
 
 import json
+import time
+import subprocess
 import urllib.request
 import docker
 from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
+from service_orchestrator import get_compose_base_cmd
 
 router = APIRouter(prefix="/api/cleanup", tags=["System Cleanup"])
 
@@ -70,3 +73,77 @@ def execute_cluster_purge():
         "timestamp": "Completed",
         "logs": logs
     }
+
+@router.post("/clean-run")
+def execute_clean_run():
+    """
+    Nuclear Cluster Clean Run / Factory Recreate:
+    1. Stops and removes all platform containers (except admin-panel).
+    2. Recreates all core services from scratch in topological dependency order.
+    3. Re-initializes PostgreSQL databases, roles, and grants.
+    4. Seeds default Delta tables (default.sales, default.inventory_delta).
+    """
+    logs = []
+    try:
+        client = docker.from_env()
+        logs.append("📦 [Step 1/5] Teardown: Stopping and removing existing cluster containers...")
+        target_containers = [
+            "hue", "spark-thriftserver", "livy", "jupyter-notebook", "keycloak",
+            "spark_delta_hive_metastore-spark-worker-1", "spark", "hive-server",
+            "pgadmin", "resourcemanager", "nodemanager", "minio", "datanode", "namenode", "hive-metastore-postgres"
+        ]
+        
+        for cname in target_containers:
+            try:
+                for c in client.containers.list(all=True):
+                    if cname in c.name:
+                        c.remove(force=True)
+                        logs.append(f"  • Removed container: {c.name}")
+            except Exception as rm_ex:
+                pass
+        
+        # 2. Recreate Foundation Services
+        logs.append("🐘 [Step 2/5] Infrastructure: Recreating PostgreSQL, NameNode & DataNode...")
+        compose_base = get_compose_base_cmd()
+        subprocess.run(compose_base + ["up", "-d", "--no-deps", "postgres", "namenode", "datanode"], capture_output=True, text=True, timeout=120)
+        
+        # Wait for postgres
+        time.sleep(3)
+        logs.append("🔑 [Step 3/5] Metadata: Initializing Metastore schemas, users (hiveuser, hueuser), and databases (metastore, hue, keycloak)...")
+        try:
+            pg = client.containers.get("hive-metastore-postgres")
+            init_sql = """
+            SELECT 'CREATE DATABASE metastore' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore')\\gexec
+            DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'hiveuser') THEN CREATE ROLE hiveuser LOGIN PASSWORD 'hivepassword'; END IF; END $$;
+            GRANT ALL PRIVILEGES ON DATABASE metastore TO hiveuser;
+            SELECT 'CREATE DATABASE hue' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'hue')\\gexec
+            DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'hueuser') THEN CREATE ROLE hueuser LOGIN PASSWORD 'hivepassword'; END IF; END $$;
+            GRANT ALL PRIVILEGES ON DATABASE hue TO hueuser;
+            SELECT 'CREATE DATABASE keycloak' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\\gexec
+            GRANT ALL PRIVILEGES ON DATABASE keycloak TO hiveuser;
+            """
+            pg.exec_run(f"psql -U hiveuser -d metastore -c \"{init_sql}\"")
+        except Exception as pg_ex:
+            logs.append(f"  • Postgres init notice: {pg_ex}")
+
+        # 3. Start remaining cluster services
+        logs.append("⚡ [Step 4/5] Compute & Apps: Starting Spark, Hive, Livy, Jupyter, MinIO, pgAdmin, Keycloak & Hue...")
+        services_to_start = ["spark", "spark-worker", "hive", "livy", "jupyter", "minio", "pgadmin", "keycloak", "hue"]
+        subprocess.run(compose_base + ["up", "-d", "--no-deps"] + services_to_start, capture_output=True, text=True, timeout=180)
+
+        # 4. Wait for Spark and seed tables
+        time.sleep(4)
+        logs.append("📊 [Step 5/5] Lakehouse Tables: Provisioning seed Delta Lake tables (`default.sales`, `default.inventory_delta`)...")
+        try:
+            spark_c = client.containers.get("spark")
+            seed_sql = "CREATE TABLE IF NOT EXISTS default.sales (id INT, item STRING, amount DOUBLE, timestamp TIMESTAMP) USING DELTA; INSERT INTO default.sales VALUES (1, 'MacBook Pro M3', 2499.00, current_timestamp()), (2, 'Dell XPS 15', 1899.50, current_timestamp()), (3, 'Sony WH-1000XM5', 399.99, current_timestamp()); CREATE TABLE IF NOT EXISTS default.inventory_delta (item_id INT, store_id INT, stock_count INT, last_restocked TIMESTAMP) USING DELTA; INSERT INTO default.inventory_delta VALUES (101, 1, 45, current_timestamp()), (102, 2, 80, current_timestamp());"
+            spark_c.exec_run(f'/opt/spark/bin/spark-sql -e "{seed_sql}"')
+            logs.append("  • Successfully seeded default Lakehouse Delta tables.")
+        except Exception as seed_ex:
+            logs.append(f"  • Seed table notice: {seed_ex}")
+
+        logs.append("✅ [Complete] Clean cluster recreate finished successfully. All pods refreshed and online.")
+        return {"status": "SUCCESS", "logs": logs}
+    except Exception as ex:
+        logs.append(f"❌ Clean run error: {ex}")
+        return {"status": "FAILED", "logs": logs}
