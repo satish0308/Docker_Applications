@@ -15,6 +15,7 @@ import psycopg2
 import pyarrow.parquet as pq
 import spark_tuning_manager
 import ui_components
+import service_orchestrator
 import threading
 import uuid
 from datetime import datetime
@@ -736,6 +737,7 @@ MODULE_MAP = {
         "📦 Table Backup & Restore"
     ],
     "📊 SYSTEM OBSERVABILITY": [
+        "🎛️ Selective Pod Orchestrator",
         "📊 Cluster Health & Links",
         "📜 Container Logs Viewer",
         "🧹 One-Click Cleanup",
@@ -1940,6 +1942,206 @@ elif menu == "⏰ Scheduled Ingestion Jobs":
                         st.rerun()
         else:
             st.info("No recurring batch jobs registered yet.")
+
+
+# =============================================================
+# MODULE: SELECTIVE POD ORCHESTRATOR & LIFECYCLE MANAGER
+# =============================================================
+elif menu == "🎛️ Selective Pod Orchestrator":
+    ui_components.render_html("""
+    <div class="glass-card">
+        <h2 style="margin: 0; font-weight: 800; font-size: 1.4rem; color: #ffffff;">🎛️ Selective Pod Orchestrator & Dependency Lifecycle Manager</h2>
+        <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 0.90rem;">
+            Selectively start, stop, and configure individual cluster services with <b>automated upstream dependency resolution</b>. 
+            When you select higher-tier platforms like <b>Hue</b>, all required foundational services (PostgreSQL, HDFS, Spark, Livy) 
+            are automatically identified and started in exact sequential order.
+        </p>
+    </div>
+    """)
+
+    # Fetch live service matrix
+    srv_matrix = service_orchestrator.get_service_status_matrix()
+    running_count = len([s for s in srv_matrix if s["is_running"]])
+    total_count = len(srv_matrix)
+
+    col_sum1, col_sum2, col_sum3 = st.columns(3)
+    with col_sum1:
+        st.markdown(f"""
+        <div class="glass-card-sm" style="border-left: 4px solid #10b981;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #34d399; font-weight: 700;">Online Services</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #ffffff;">{running_count} / {total_count} Active</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_sum2:
+        st.markdown(f"""
+        <div class="glass-card-sm" style="border-left: 4px solid #f59e0b;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #fbbf24; font-weight: 700;">Offline / Dormant</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #ffffff;">{total_count - running_count} Dormant</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_sum3:
+        st.markdown(f"""
+        <div class="glass-card-sm" style="border-left: 4px solid #6366f1;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #818cf8; font-weight: 700;">Resolution Engine</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #ffffff;">Topological DAG</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ---------------------------------------------------------
+    # SECTION 1: 1-CLICK OPERATIONAL PRESET PROFILES
+    # ---------------------------------------------------------
+    st.markdown('<div class="section-title">🚀 1. 1-Click Operational Profiles</div>', unsafe_allow_html=True)
+    
+    preset_names = list(service_orchestrator.OPERATIONAL_PRESETS.keys())
+    selected_preset_name = st.selectbox("Select Operational Profile:", preset_names, index=0)
+    preset_info = service_orchestrator.OPERATIONAL_PRESETS[selected_preset_name]
+
+    resolved_preset_deps = service_orchestrator.resolve_dependencies(preset_info["services"])
+    resolved_preset_names = [service_orchestrator.SERVICE_REGISTRY[k]["name"] for k in resolved_preset_deps if k in service_orchestrator.SERVICE_REGISTRY]
+
+    col_p1, col_p2 = st.columns([3, 1])
+    with col_p1:
+        st.markdown(f"""
+        <div class="glass-card-sm" style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.12);">
+            <div style="font-weight: 800; font-size: 1.05rem; color: #ffffff;">{selected_preset_name}</div>
+            <p style="margin: 4px 0 8px 0; color: #cbd5e1; font-size: 0.88rem;">{preset_info['desc']}</p>
+            <div style="font-size: 0.82rem; color: #38bdf8; font-weight: 600;">
+                🧠 Est. RAM Footprint: <span style="color: #ffffff;">{preset_info['est_ram']}</span> | 📦 Target Pods: <span style="color: #ffffff;">{len(resolved_preset_deps)} containers</span>
+            </div>
+            <div style="margin-top: 8px; font-size: 0.80rem; color: #94a3b8;">
+                ⛓️ Sequential Startup Chain: <b style="color: #a5b4fc;">{' ➔ '.join(resolved_preset_names)}</b>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_p2:
+        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+        if st.button(f"🚀 Launch Profile Fleet", type="primary", use_container_width=True):
+            with st.spinner(f"Launching {selected_preset_name} in topological sequence..."):
+                res = service_orchestrator.start_services_sequential(preset_info["services"])
+                st.success(f"Profile `{selected_preset_name}` launched!")
+                for r in res:
+                    st.write(f"• **{r['service']}**: `{r['status']}` — {r['msg']}")
+                time.sleep(2)
+                st.rerun()
+
+        if st.button(f"⏹️ Stop Profile Fleet", use_container_width=True):
+            with st.spinner(f"Stopping profile services..."):
+                res = service_orchestrator.stop_services_cascade(preset_info["services"], cascade=True)
+                st.info(f"Profile `{selected_preset_name}` stopped.")
+                for r in res:
+                    st.write(f"• **{r['service']}**: `{r['status']}` — {r['msg']}")
+                time.sleep(2)
+                st.rerun()
+
+    # ---------------------------------------------------------
+    # SECTION 2: CUSTOM SERVICE MULTI-SELECT & LIVE DEPENDENCY GRAPH
+    # ---------------------------------------------------------
+    st.markdown('<div class="section-title">⛓️ 2. Custom Pod Multi-Select & Live Dependency DAG</div>', unsafe_allow_html=True)
+
+    all_service_keys = list(service_orchestrator.SERVICE_REGISTRY.keys())
+    service_options = {k: f"{service_orchestrator.SERVICE_REGISTRY[k]['icon']} {service_orchestrator.SERVICE_REGISTRY[k]['name']} ({k})" for k in all_service_keys}
+
+    selected_custom_keys = st.multiselect(
+        "Choose target services to launch or configure:",
+        options=all_service_keys,
+        format_func=lambda k: service_options[k],
+        default=["hue"]
+    )
+
+    if selected_custom_keys:
+        resolved_custom_deps = service_orchestrator.resolve_dependencies(selected_custom_keys)
+        direct_names = [service_orchestrator.SERVICE_REGISTRY[k]["name"] for k in selected_custom_keys]
+        all_resolved_names = [service_orchestrator.SERVICE_REGISTRY[k]["name"] for k in resolved_custom_deps]
+        auto_added_keys = [k for k in resolved_custom_deps if k not in selected_custom_keys]
+        auto_added_names = [service_orchestrator.SERVICE_REGISTRY[k]["name"] for k in auto_added_keys]
+
+        st.markdown(f"""
+        <div class="glass-card-sm" style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(99, 102, 241, 0.35);">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #a5b4fc; text-transform: uppercase;">Topological Dependency Resolution Graph</div>
+            <div style="margin-top: 6px; font-size: 0.88rem; color: #ffffff;">
+                🎯 <b>Directly Selected ({len(selected_custom_keys)}):</b> <span style="color: #38bdf8;">{', '.join(direct_names)}</span>
+            </div>
+            {f'<div style="margin-top: 4px; font-size: 0.88rem; color: #cbd5e1;">⛓️ <b>Auto-Resolved Upstream Dependencies ({len(auto_added_keys)}):</b> <span style="color: #fbbf24;">{", ".join(auto_added_names)}</span></div>' if auto_added_keys else '<div style="margin-top: 4px; font-size: 0.85rem; color: #34d399;">✅ All foundational dependencies satisfied.</div>'}
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 0.84rem; color: #e2e8f0;">
+                🚀 <b>Execution Sequence (Topological Order):</b> <span style="color: #ffffff; font-family: monospace;">{' ➔ '.join(all_resolved_names)}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_c_act1, col_c_act2 = st.columns([1, 1])
+        with col_c_act1:
+            if st.button("▶️ Start Selected Fleet & Dependencies", type="primary", use_container_width=True):
+                with st.spinner("Starting services and resolving dependencies..."):
+                    res = service_orchestrator.start_services_sequential(selected_custom_keys)
+                    st.success("Target services & dependencies started!")
+                    for r in res:
+                        st.write(f"• **{r['service']}**: `{r['status']}` — {r['msg']}")
+                    time.sleep(2)
+                    st.rerun()
+        with col_c_act2:
+            if st.button("⏹️ Stop Selected Fleet (Cascade Downstream)", use_container_width=True):
+                with st.spinner("Stopping services and cascading to dependents..."):
+                    res = service_orchestrator.stop_services_cascade(selected_custom_keys, cascade=True)
+                    st.info("Target services & cascade stopped.")
+                    for r in res:
+                        st.write(f"• **{r['service']}**: `{r['status']}` — {r['msg']}")
+                    time.sleep(2)
+                    st.rerun()
+
+    # ---------------------------------------------------------
+    # SECTION 3: LIVE SERVICE FLEET MATRIX & INDIVIDUAL CONTROLS
+    # ---------------------------------------------------------
+    st.markdown('<div class="section-title">📦 3. Live Cluster Service Fleet Matrix</div>', unsafe_allow_html=True)
+
+    tier_options = ["All Tiers", "Foundation & Metadata", "Compute Engines", "Interactive Studios", "Security & Management"]
+    selected_tier = st.radio("Filter by Architecture Tier:", tier_options, horizontal=True)
+
+    filtered_matrix = srv_matrix if selected_tier == "All Tiers" else [m for m in srv_matrix if m["tier"] == selected_tier]
+
+    for item in filtered_matrix:
+        status_color = "#34d399" if item["status"] == "RUNNING" else ("#fb7185" if item["status"] == "UNHEALTHY" else "#94a3b8")
+        status_badge = f'<span style="display: inline-block; padding: 2px 10px; background: rgba(255,255,255,0.06); border: 1px solid {status_color}; border-radius: 9999px; color: {status_color}; font-size: 0.75rem; font-weight: 700;">{item["status"]}</span>'
+
+        with st.container():
+            col_m1, col_m2, col_m3 = st.columns([4, 2, 3])
+            with col_m1:
+                st.markdown(f"""
+                <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+                    <div style="font-size: 1.6rem;">{item['icon']}</div>
+                    <div>
+                        <div style="font-weight: 800; font-size: 0.98rem; color: #ffffff;">{item['name']}</div>
+                        <div style="font-size: 0.78rem; color: #cbd5e1;"><code>{item['compose_service']}</code> • {item['desc']}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_m2:
+                st.markdown(f"""
+                <div style="padding: 10px 0; font-size: 0.80rem; color: #cbd5e1;">
+                    <div>Status: {status_badge}</div>
+                    <div style="margin-top: 3px; color: #94a3b8;">Port: <b>{item['port']}</b> | RAM: <b>{item['est_ram']}</b></div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_m3:
+                c_btn1, c_btn2, c_btn3 = st.columns(3)
+                with c_btn1:
+                    if st.button("▶️ Start", key=f"start_{item['key']}", disabled=item["is_running"], use_container_width=True):
+                        with st.spinner(f"Starting {item['name']} and dependencies..."):
+                            service_orchestrator.start_services_sequential([item['key']])
+                            st.rerun()
+                with c_btn2:
+                    if st.button("⏹️ Stop", key=f"stop_{item['key']}", disabled=not item["is_running"], use_container_width=True):
+                        with st.spinner(f"Stopping {item['name']}..."):
+                            service_orchestrator.stop_services_cascade([item['key']], cascade=False)
+                            st.rerun()
+                with c_btn3:
+                    if st.button("🔄 Restart", key=f"rst_{item['key']}", disabled=not item["is_running"], use_container_width=True):
+                        with st.spinner(f"Restarting {item['name']}..."):
+                            service_orchestrator.restart_single_service(item['key'])
+                            st.rerun()
+            st.markdown("<hr style='margin: 4px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.06);'>", unsafe_allow_html=True)
 
 
 # =============================================================
