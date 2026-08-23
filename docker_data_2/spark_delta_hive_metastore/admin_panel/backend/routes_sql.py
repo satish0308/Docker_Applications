@@ -32,6 +32,43 @@ def save_sql_query_jobs(jobs):
     with open(SQL_JOBS_FILE, "w") as f:
         json.dump(jobs, f, indent=2)
 
+def clean_spark_sql_output(raw_output: str) -> str:
+    """Strips JVM startup notices, environment logs, and Spark noise, returning ONLY the clean SQL tabular result or execution notice."""
+    if not raw_output:
+        return "Query executed successfully. (0 output rows returned)"
+    
+    lines = raw_output.splitlines()
+    clean_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip JVM options notices & Spark log noise
+        if stripped.startswith("NOTE: Picked up JDK_JAVA_OPTIONS:") or \
+           stripped.startswith("Setting default log level to") or \
+           stripped.startswith("To adjust logging level use") or \
+           stripped.startswith("Spark Web UI available at") or \
+           stripped.startswith("Spark master:") or \
+           "WARN Utils: Service 'SparkUI'" in stripped or \
+           "WARN NativeCodeLoader:" in stripped or \
+           "HiveConf of name" in stripped or \
+           "WARN ObjectStore:" in stripped or \
+           "INFO ObjectStore:" in stripped or \
+           "INFO HiveMetaStore:" in stripped or \
+           "INFO audit:" in stripped or \
+           "INFO SparkContext:" in stripped or \
+           "INFO MemoryStore:" in stripped or \
+           "INFO BlockManager:" in stripped or \
+           "WARN SparkConf:" in stripped:
+            continue
+        clean_lines.append(line)
+    
+    cleaned = "\n".join(clean_lines).strip()
+    if not cleaned:
+        return "Query executed successfully. (0 output rows returned)"
+    return cleaned
+
 def execute_query_background(query_id: str, query_sql: str):
     """Executes query inside Spark container decoupled in background."""
     try:
@@ -44,6 +81,7 @@ def execute_query_background(query_id: str, query_sql: str):
         # Execute
         res = spark_cont.exec_run(cmd)
         output_str = res.output.decode('utf-8', errors='ignore')
+        cleaned_preview = clean_spark_sql_output(output_str)
 
         jobs = load_sql_query_jobs()
         for j in jobs:
@@ -52,7 +90,7 @@ def execute_query_background(query_id: str, query_sql: str):
                 j["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 j["exit_code"] = res.exit_code
                 j["recent_logs"] = output_str[-4000:]
-                j["result_preview"] = output_str[:4000]
+                j["result_preview"] = cleaned_preview
                 break
         save_sql_query_jobs(jobs)
 
@@ -63,6 +101,7 @@ def execute_query_background(query_id: str, query_sql: str):
                 j["status"] = "FAILED"
                 j["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 j["recent_logs"] = str(ex)
+                j["result_preview"] = f"Execution Error: {ex}"
                 break
         save_sql_query_jobs(jobs)
 

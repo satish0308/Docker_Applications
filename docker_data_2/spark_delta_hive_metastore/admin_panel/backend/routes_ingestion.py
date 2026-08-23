@@ -152,8 +152,58 @@ def run_chunked_ingestion_job_thread(
 
 @router.get("/jobs")
 def get_ingestion_jobs():
-    """Returns list of all active and historical ingestion jobs."""
-    return {"jobs": load_ingestion_jobs()}
+    """Returns list of all active and historical ingestion jobs, automatically reconciling stale jobs."""
+    jobs = load_ingestion_jobs()
+    
+    try:
+        client = docker.from_env()
+        spark_cont = client.containers.get("spark")
+        res = spark_cont.exec_run("ps aux")
+        ps_output = res.output.decode('utf-8', errors='ignore') if res.exit_code == 0 else ""
+        
+        dirty = False
+        for j in jobs:
+            if j.get("status") in ["RUNNING", "QUEUED"]:
+                job_id = j.get("job_id", "")
+                script_pattern = f"script_{job_id}"
+                if script_pattern not in ps_output:
+                    j["status"] = "INTERRUPTED"
+                    j["current_batch_msg"] = "Process terminated or container restarted."
+                    j["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    dirty = True
+        if dirty:
+            save_ingestion_jobs(jobs)
+    except Exception:
+        pass
+
+    return {"jobs": jobs}
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_ingestion_job(job_id: str):
+    """Cancels a running ingestion job and terminates any active Spark process."""
+    try:
+        client = docker.from_env()
+        spark_cont = client.containers.get("spark")
+        spark_cont.exec_run(f"pkill -f script_{job_id}")
+    except Exception:
+        pass
+
+    update_job_status(
+        job_id,
+        status="CANCELLED",
+        finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        current_batch_msg="Ingestion job cancelled by user.",
+        progress_pct=100
+    )
+    return {"status": "SUCCESS", "message": f"Job {job_id} cancelled."}
+
+@router.delete("/jobs/clear-completed")
+def clear_completed_ingestion_jobs():
+    """Removes all finished, failed, cancelled, and interrupted jobs from history."""
+    jobs = load_ingestion_jobs()
+    jobs = [j for j in jobs if j.get("status") in ["RUNNING", "QUEUED"]]
+    save_ingestion_jobs(jobs)
+    return {"status": "SUCCESS", "message": "Cleared non-running jobs."}
 
 @router.delete("/jobs/{job_id}")
 def delete_ingestion_job(job_id: str):

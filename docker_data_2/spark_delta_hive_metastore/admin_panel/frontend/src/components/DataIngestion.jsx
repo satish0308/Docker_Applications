@@ -251,6 +251,24 @@ export default function DataIngestion() {
     }
   };
 
+  const handleCancelJob = async (jobId) => {
+    try {
+      await fetch(`/api/ingestion/jobs/${jobId}/cancel`, { method: 'POST' });
+      fetchJobs();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleClearCompleted = async () => {
+    try {
+      await fetch('/api/ingestion/jobs/clear-completed', { method: 'DELETE' });
+      fetchJobs();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="space-y-6">
       
@@ -580,13 +598,23 @@ export default function DataIngestion() {
               <Clock className="w-4 h-4 text-sky-400" />
               Persistent Ingestion Jobs ({jobs.length})
             </h3>
-            <button
-              onClick={fetchJobs}
-              className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-              title="Refresh Jobs"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleClearCompleted}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold border border-white/10 flex items-center gap-1 transition"
+                title="Clear Completed and Interrupted Jobs"
+              >
+                <Trash2 className="w-3 h-3 text-slate-400" />
+                Clear History
+              </button>
+              <button
+                onClick={fetchJobs}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                title="Refresh Jobs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scrollbar">
@@ -630,6 +658,16 @@ export default function DataIngestion() {
                         }`}>
                           {job.status}
                         </span>
+
+                        {isRunning && (
+                          <button
+                            onClick={() => handleCancelJob(job.job_id)}
+                            className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-bold border border-rose-500/30 transition"
+                            title="Stop / Cancel Job"
+                          >
+                            Stop
+                          </button>
+                        )}
 
                         <button
                           onClick={() => setExpandedJobId(isExpanded ? null : job.job_id)}
