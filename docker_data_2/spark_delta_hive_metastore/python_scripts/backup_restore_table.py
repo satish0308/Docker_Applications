@@ -174,6 +174,10 @@ def backup_database(spark, db_name="default", custom_backup_name=None):
         "elapsed_seconds": 0.0
     }
 
+    manifest_path = os.path.join(target_dir, "backup_manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(db_manifest, f, indent=2)
+
     # 2. Back up each table sequentially with checksums
     for idx, tbl in enumerate(table_names, 1):
         print(f"\n[{idx}/{len(table_names)}] Backing up table `{db_name}.{tbl}`...")
@@ -192,13 +196,17 @@ def backup_database(spark, db_name="default", custom_backup_name=None):
         except Exception as e:
             print(f"⚠️ Error backing up table `{tbl}`: {e}")
             db_manifest["tables"][tbl] = {"status": "error", "error": str(e)}
+        
+        # Incrementally update master manifest after each table
+        db_manifest["total_size_mb"] = round(db_manifest["total_size_bytes"] / (1024 * 1024), 2)
+        with open(manifest_path, "w") as f:
+            json.dump(db_manifest, f, indent=2)
 
     elapsed = time.time() - t0
     db_manifest["total_size_mb"] = round(db_manifest["total_size_bytes"] / (1024 * 1024), 2)
     db_manifest["elapsed_seconds"] = round(elapsed, 2)
 
-    # 3. Write Database Master Manifest
-    manifest_path = os.path.join(target_dir, "backup_manifest.json")
+    # 3. Finalize Database Master Manifest
     with open(manifest_path, "w") as f:
         json.dump(db_manifest, f, indent=2)
 
