@@ -308,12 +308,13 @@ for batch_idx in range(total_batches):
         if clean_c != c:
             df_batch = df_batch.withColumnRenamed(c, clean_c)
 
+    df_batch = df_batch.coalesce(4)
     batch_row_count = df_batch.count()
     total_rows_ingested += batch_row_count
 
     mode_to_use = "{req.write_mode}" if batch_idx == 0 else "append"
 
-    if {str(is_delta).lower()}:
+    if {is_delta}:
         writer = df_batch.write.format("delta").mode(mode_to_use){partition_expr}
         if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
             writer.option("path", "{dest_path}")
@@ -332,7 +333,9 @@ print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
 spark.stop()
 """
     tuning_cfg = spark_tuning_manager.load_tuning_config()
-    params = tuning_cfg.get("params", spark_tuning_manager.PROFILES.get("🔴 Heavy (Large Big Data / >10M Rows)"))
+    params = dict(tuning_cfg.get("params", spark_tuning_manager.PROFILES.get("🔴 Heavy (Large Big Data / >10M Rows)")))
+    params["driver_memory"] = "4g"
+    params["executor_memory"] = "4g"
 
     job_record = {
         "job_id": job_id,
@@ -470,7 +473,7 @@ for c in df.columns:
 row_count = df.count()
 print(f"--> Ingesting {{row_count:,}} rows into '{target_database}.{target_table}' ({table_format})...")
 
-if {str(is_delta).lower()}:
+if {is_delta}:
     writer = df.write.format("delta").mode("{write_mode}"){partition_expr}
     if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
         writer.option("path", "{dest_path}")

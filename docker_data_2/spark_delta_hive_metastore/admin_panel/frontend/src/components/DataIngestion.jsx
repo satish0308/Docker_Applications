@@ -45,7 +45,7 @@ export default function DataIngestion() {
   const [format, setFormat] = useState('delta'); // 'delta' or 'parquet'
   const [writeMode, setWriteMode] = useState('overwrite'); // 'overwrite' or 'append'
   const [destStorage, setDestStorage] = useState('s3'); // 's3' or 'hdfs'
-  const [chunkSize, setChunkSize] = useState(100);
+  const [chunkSize, setChunkSize] = useState(25);
   
   // Partition Columns (Multi-Select Array)
   const [selectedPartitions, setSelectedPartitions] = useState(['season']);
