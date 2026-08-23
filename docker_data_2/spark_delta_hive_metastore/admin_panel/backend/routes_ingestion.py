@@ -192,6 +192,36 @@ def list_server_datasets():
                 })
     return {"datasets": datasets}
 
+@router.get("/dataset-columns/{dataset_name}")
+def get_dataset_columns(dataset_name: str):
+    """Inspects a sample file from a pre-staged server dataset and returns column names."""
+    data_dir = resolve_data_dir()
+    ds_path = os.path.join(data_dir, dataset_name)
+    if not os.path.exists(ds_path):
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    files = [f for f in os.listdir(ds_path) if not f.startswith(".") and not f.startswith("_")]
+    if not files:
+        return {"columns": []}
+    
+    sample_file = os.path.join(ds_path, files[0])
+    columns = []
+    try:
+        if sample_file.endswith(".parquet") or sample_file.endswith(".pq") or "parquet" in sample_file:
+            import pyarrow.parquet as pq
+            schema = pq.read_schema(sample_file)
+            columns = schema.names
+        elif sample_file.endswith(".json") or sample_file.endswith(".jsonl"):
+            df = pd.read_json(sample_file, lines=True, nrows=5)
+            columns = list(df.columns)
+        else:
+            df = pd.read_csv(sample_file, nrows=5)
+            columns = list(df.columns)
+    except Exception:
+        pass
+    
+    return {"columns": columns}
+
 class ServerDatasetIngestRequest(BaseModel):
     dataset_name: str
     target_database: str = "default"

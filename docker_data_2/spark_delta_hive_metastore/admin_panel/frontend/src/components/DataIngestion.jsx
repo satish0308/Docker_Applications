@@ -19,7 +19,9 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
-  Sparkles
+  Sparkles,
+  X,
+  Plus
 } from 'lucide-react';
 
 export default function DataIngestion() {
@@ -29,6 +31,7 @@ export default function DataIngestion() {
   const [serverDatasets, setServerDatasets] = useState([]);
   const [selectedDataset, setSelectedDataset] = useState('');
   const [datasetsLoading, setDatasetsLoading] = useState(false);
+  const [availableColumns, setAvailableColumns] = useState([]);
 
   // File upload state
   const [file, setFile] = useState(null);
@@ -43,7 +46,11 @@ export default function DataIngestion() {
   const [writeMode, setWriteMode] = useState('overwrite'); // 'overwrite' or 'append'
   const [destStorage, setDestStorage] = useState('s3'); // 's3' or 'hdfs'
   const [chunkSize, setChunkSize] = useState(100);
-  const [partitionCols, setPartitionCols] = useState('season');
+  
+  // Partition Columns (Multi-Select Array)
+  const [selectedPartitions, setSelectedPartitions] = useState(['season']);
+  const [isPartitionDropdownOpen, setIsPartitionDropdownOpen] = useState(false);
+  const [customPartitionInput, setCustomPartitionInput] = useState('');
 
   // Execution & Job Registry
   const [submitting, setSubmitting] = useState(false);
@@ -63,6 +70,18 @@ export default function DataIngestion() {
     }
   };
 
+  const fetchDatasetColumns = async (datasetName) => {
+    if (!datasetName) return;
+    try {
+      const res = await fetch(`/api/ingestion/dataset-columns/${datasetName}`);
+      const data = await res.json();
+      const cols = data.columns || [];
+      setAvailableColumns(cols);
+    } catch (err) {
+      console.error("Failed to load dataset columns:", err);
+    }
+  };
+
   const fetchServerDatasets = async () => {
     setDatasetsLoading(true);
     try {
@@ -70,9 +89,11 @@ export default function DataIngestion() {
       const data = await res.json();
       const ds = data.datasets || [];
       setServerDatasets(ds);
-      if (ds.length > 0 && !selectedDataset) {
-        setSelectedDataset(ds[0].name);
-        setTargetTable(ds[0].name.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+      if (ds.length > 0) {
+        const initialDs = selectedDataset || ds[0].name;
+        setSelectedDataset(initialDs);
+        setTargetTable(initialDs.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+        fetchDatasetColumns(initialDs);
       }
     } catch (err) {
       console.error("Failed to load server datasets:", err);
@@ -107,6 +128,7 @@ export default function DataIngestion() {
     setSelectedDataset(name);
     const cleanName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
     setTargetTable(cleanName);
+    fetchDatasetColumns(name);
   };
 
   const handleFileChange = async (e) => {
@@ -127,6 +149,9 @@ export default function DataIngestion() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to preview schema");
       setSchemaPreview(data);
+      if (data.columns) {
+        setAvailableColumns(data.columns);
+      }
       
       const baseName = selectedFile.name.split('.')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_');
       setTargetTable(baseName);
@@ -136,6 +161,23 @@ export default function DataIngestion() {
       setPreviewLoading(false);
     }
   };
+
+  const togglePartitionCol = (col) => {
+    if (selectedPartitions.includes(col)) {
+      setSelectedPartitions(selectedPartitions.filter(c => c !== col));
+    } else {
+      setSelectedPartitions([...selectedPartitions, col]);
+    }
+  };
+
+  const handleAddCustomPartition = () => {
+    if (customPartitionInput.trim() && !selectedPartitions.includes(customPartitionInput.trim())) {
+      setSelectedPartitions([...selectedPartitions, customPartitionInput.trim()]);
+      setCustomPartitionInput('');
+    }
+  };
+
+  const partitionColsStr = selectedPartitions.join(',');
 
   const handleSubmitServerDataset = async (e) => {
     e.preventDefault();
@@ -155,7 +197,7 @@ export default function DataIngestion() {
           write_mode: writeMode,
           dest_storage: destStorage,
           chunk_size: parseInt(chunkSize) || 100,
-          partition_cols: partitionCols
+          partition_cols: partitionColsStr
         })
       });
       const data = await res.json();
@@ -182,7 +224,7 @@ export default function DataIngestion() {
     formData.append('table_format', format);
     formData.append('write_mode', writeMode);
     formData.append('dest_storage', destStorage);
-    formData.append('partition_cols', partitionCols);
+    formData.append('partition_cols', partitionColsStr);
 
     try {
       const res = await fetch('/api/ingestion/submit', {
@@ -220,7 +262,7 @@ export default function DataIngestion() {
             High-Throughput Chunked Ingestion & Lakehouse Loader
           </h2>
           <p className="text-xs text-slate-300 mt-1 max-w-3xl">
-            Ingest terabyte-scale distributed datasets (e.g. 716-part Parquet files in <code>/data/df_inv_3</code>) or upload local files. Automatically registers ACID Delta Lake and Hive tables on MinIO S3 and HDFS.
+            Ingest terabyte-scale distributed datasets or upload local files. Automatically registers ACID Delta Lake and Hive tables on MinIO S3 and HDFS.
           </p>
         </div>
 
@@ -427,15 +469,98 @@ export default function DataIngestion() {
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-400 uppercase">Partition Column(s) (Optional):</label>
-            <input
-              type="text"
-              value={partitionCols}
-              onChange={(e) => setPartitionCols(e.target.value)}
-              placeholder="e.g. season, store_id"
-              className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
-            />
+          {/* MULTI-SELECT PARTITION COLUMN DROPDOWN & BADGE SELECTOR */}
+          <div className="space-y-2 relative">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-400 uppercase flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                Partition Column(s) (Multi-Select):
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsPartitionDropdownOpen(!isPartitionDropdownOpen)}
+                className="text-[11px] text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-1"
+              >
+                {isPartitionDropdownOpen ? 'Close Menu ▲' : 'Choose Columns ▼'}
+              </button>
+            </div>
+
+            {/* Selected Partition Badges */}
+            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-slate-900 border border-white/15 min-h-[42px]">
+              {selectedPartitions.length === 0 ? (
+                <span className="text-xs text-slate-500 italic">No partition columns selected (table will be unpartitioned)</span>
+              ) : (
+                selectedPartitions.map(col => (
+                  <span
+                    key={col}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 text-xs font-mono font-bold"
+                  >
+                    <span>{col}</span>
+                    <button
+                      type="button"
+                      onClick={() => togglePartitionCol(col)}
+                      className="hover:text-white transition"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            {/* Multi-Select Dropdown Popover */}
+            {isPartitionDropdownOpen && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-sky-500/40 shadow-2xl space-y-3 z-30 animate-in fade-in zoom-in duration-150">
+                <div className="text-[11px] font-bold text-slate-400 uppercase">
+                  Available Dataset Columns ({availableColumns.length}):
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                  {availableColumns.length === 0 ? (
+                    <div className="text-xs text-slate-500 italic p-2">
+                      Select a dataset above to inspect columns.
+                    </div>
+                  ) : (
+                    availableColumns.map(col => {
+                      const isSelected = selectedPartitions.includes(col);
+                      return (
+                        <button
+                          key={col}
+                          type="button"
+                          onClick={() => togglePartitionCol(col)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-mono transition flex items-center gap-1.5 ${
+                            isSelected
+                              ? 'bg-sky-600 text-white font-bold shadow'
+                              : 'bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:border-white/30'
+                          }`}
+                        >
+                          <span>{isSelected ? '✓' : '+'}</span>
+                          <span>{col}</span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Custom Column Input */}
+                <div className="flex items-center gap-2 pt-1 border-t border-white/10">
+                  <input
+                    type="text"
+                    value={customPartitionInput}
+                    onChange={(e) => setCustomPartitionInput(e.target.value)}
+                    placeholder="Type custom column name..."
+                    className="flex-1 bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomPartition}
+                    className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-sky-300 border border-white/10"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <button
