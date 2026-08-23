@@ -166,21 +166,76 @@ def prune_old_backups(database: str, table: Optional[str], mode: str, retention_
     return pruned
 
 # -------------------------------------------------------------
+# DYNAMIC SPARK TUNING RESOLUTION FOR BACKUP / RESTORE
+# -------------------------------------------------------------
+
+def get_backup_tuning_flags() -> str:
+    """Reads active cluster dynamic tuning profile and constructs optimized spark-submit arguments."""
+    p = {}
+    config_paths = ["/app/spark_tuning_config.json", "spark_tuning_config.json", "admin_panel/spark_tuning_config.json"]
+    for cp in config_paths:
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r") as f:
+                    data = json.load(f)
+                    p = data.get("params") or data.get("active_params") or {}
+                    if p:
+                        break
+            except Exception:
+                pass
+
+    drv_mem = p.get("driver_memory", "4g")
+    exe_mem = p.get("executor_memory", "6g")
+    exe_cores = str(p.get("executor_cores", 2))
+    max_cores = str(p.get("max_cores", 6))
+    shuffle_parts = str(p.get("shuffle_partitions", 64))
+    dra = "true" if p.get("dynamic_allocation", True) else "false"
+    aqe = "true" if p.get("aqe_enabled", True) else "false"
+    mem_frac = str(p.get("memory_fraction", 0.8))
+    storage_frac = str(p.get("storage_fraction", 0.3))
+
+    flags = [
+        f"--driver-memory {drv_mem}",
+        f"--conf spark.executor.memory={exe_mem}",
+        f"--conf spark.executor.cores={exe_cores}",
+        f"--conf spark.cores.max={max_cores}",
+        f"--conf spark.sql.shuffle.partitions={shuffle_parts}",
+        f"--conf spark.dynamicAllocation.enabled={dra}",
+        f"--conf spark.sql.adaptive.enabled={aqe}",
+        f"--conf spark.memory.fraction={mem_frac}",
+        f"--conf spark.memory.storageFraction={storage_frac}",
+        "--conf spark.sql.parquet.columnarReaderBatchSize=1024",
+        "--conf spark.sql.files.maxPartitionBytes=67108864",
+        "--conf spark.network.timeout=800s",
+        "--conf spark.executor.heartbeatInterval=60s"
+    ]
+
+    if p.get("offheap_enabled", False) and str(p.get("offheap_size", "0")) not in ["0", "0g", "0m", ""]:
+        flags.append("--conf spark.memory.offHeap.enabled=true")
+        flags.append(f"--conf spark.memory.offHeap.size={p.get('offheap_size', '1g')}")
+
+    if p.get("kryo_serializer", True):
+        flags.append("--conf spark.serializer=org.apache.spark.serializer.KryoSerializer")
+
+    return " ".join(flags)
+
+# -------------------------------------------------------------
 # ASYNCHRONOUS DECOUPLED EXECUTION RUNNERS
 # -------------------------------------------------------------
 
 def run_backup_background(job_id: str, mode: str, database: str, table: Optional[str], custom_backup_id: Optional[str], retention_count: Optional[int]):
-    """Decoupled background worker executing backup inside Spark container."""
+    """Decoupled background worker executing backup inside Spark container using dynamic tuning specs."""
     t0 = time.time()
     try:
         client = docker.from_env()
         spark_cont = client.containers.get("spark")
+        tuning_flags = get_backup_tuning_flags()
 
         if mode == "database":
-            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup-db --database {database}"
+            cmd = f"/opt/spark/bin/spark-submit {tuning_flags} /opt/spark/python_scripts/backup_restore_table.py backup-db --database {database}"
         else:
             table_name = table or "sales"
-            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup --table {database}.{table_name}"
+            cmd = f"/opt/spark/bin/spark-submit {tuning_flags} /opt/spark/python_scripts/backup_restore_table.py backup --table {database}.{table_name}"
         
         if custom_backup_id and custom_backup_id.strip():
             cmd += f" --backup-id {custom_backup_id.strip()}"
@@ -220,17 +275,18 @@ def run_backup_background(job_id: str, mode: str, database: str, table: Optional
         save_backup_jobs(jobs)
 
 def run_restore_background(job_id: str, backup_id: str, mode: str, target_database: str, target_table: Optional[str], storage_dest: str):
-    """Decoupled background worker executing restore inside Spark container."""
+    """Decoupled background worker executing restore inside Spark container using dynamic tuning specs."""
     t0 = time.time()
     try:
         client = docker.from_env()
         spark_cont = client.containers.get("spark")
+        tuning_flags = get_backup_tuning_flags()
 
         if mode == "database":
-            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore-db --backup-id {backup_id} --database {target_database} --storage-dest {storage_dest}"
+            cmd = f"/opt/spark/bin/spark-submit {tuning_flags} /opt/spark/python_scripts/backup_restore_table.py restore-db --backup-id {backup_id} --database {target_database} --storage-dest {storage_dest}"
         else:
             target_tbl_arg = f"--target-table {target_table}" if target_table else ""
-            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore --backup-id {backup_id} --database {target_database} {target_tbl_arg} --storage-dest {storage_dest}"
+            cmd = f"/opt/spark/bin/spark-submit {tuning_flags} /opt/spark/python_scripts/backup_restore_table.py restore --backup-id {backup_id} --database {target_database} {target_tbl_arg} --storage-dest {storage_dest}"
         
         res = spark_cont.exec_run(cmd)
         output = res.output.decode("utf-8", errors="ignore")

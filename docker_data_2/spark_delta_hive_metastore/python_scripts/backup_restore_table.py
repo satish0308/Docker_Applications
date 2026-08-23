@@ -19,19 +19,48 @@ from pyspark.sql import SparkSession
 BACKUP_ROOT_DIR = "/backups"
 
 def get_spark(app_name="Table_Backup_Restore_Engine"):
-    return SparkSession.builder \
-        .appName(app_name) \
-        .config("spark.driver.memory", "2g") \
-        .config("spark.executor.memory", "3g") \
-        .config("spark.sql.shuffle.partitions", "16") \
+    builder = SparkSession.builder.appName(app_name)
+    
+    # Dynamically inherit active Spark tuning parameters
+    p = {}
+    config_paths = ["/app/spark_tuning_config.json", "spark_tuning_config.json", "/opt/spark/python_scripts/spark_tuning_config.json"]
+    for cp in config_paths:
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r") as f:
+                    data = json.load(f)
+                    p = data.get("params") or data.get("active_params") or {}
+                    if p:
+                        break
+            except Exception:
+                pass
+
+    drv_mem = p.get("driver_memory", "4g")
+    exe_mem = p.get("executor_memory", "6g")
+    shuffle_parts = str(p.get("shuffle_partitions", 64))
+    mem_frac = str(p.get("memory_fraction", 0.8))
+    storage_frac = str(p.get("storage_fraction", 0.3))
+
+    builder = builder \
+        .config("spark.driver.memory", drv_mem) \
+        .config("spark.executor.memory", exe_mem) \
+        .config("spark.sql.shuffle.partitions", shuffle_parts) \
+        .config("spark.memory.fraction", mem_frac) \
+        .config("spark.memory.storageFraction", storage_frac) \
+        .config("spark.sql.parquet.columnarReaderBatchSize", "1024") \
+        .config("spark.sql.files.maxPartitionBytes", "67108864") \
         .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
         .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
         .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
-        .enableHiveSupport() \
-        .getOrCreate()
+        .enableHiveSupport()
+
+    if p.get("kryo_serializer", True):
+        builder = builder.config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
+    return builder.getOrCreate()
 
 def compute_checksum(file_path):
     """Computes SHA-256 checksum of a file for bit-for-bit corruption checks."""
@@ -84,12 +113,16 @@ def backup_table(spark, db_name, table_name, custom_backup_name=None, base_dir=N
     except Exception:
         ddl_sql = f"-- Recreated DDL for {full_table_name}\n"
 
-    # 4. Export Table Data to Local Backup Directory
+    # 4. Export Table Data to Local Backup Directory with Memory-Safe Batch Partitioning
     print(f"--> [BACKUP] Exporting {total_rows:,} rows of data...")
+    num_parts = df.rdd.getNumPartitions()
+    target_parts = max(1, min(32, total_rows // 250000))
+    export_df = df.coalesce(target_parts) if (num_parts > target_parts and target_parts > 0) else df
+
     if is_delta:
-        df.write.format("delta").mode("overwrite").save(f"file://{data_dir}")
+        export_df.write.format("delta").mode("overwrite").save(f"file://{data_dir}")
     else:
-        df.write.format("parquet").mode("overwrite").save(f"file://{data_dir}")
+        export_df.write.format("parquet").mode("overwrite").save(f"file://{data_dir}")
 
     # 5. Compute File Checksums for Corruption Protection
     file_manifest = {}
