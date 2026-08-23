@@ -93,10 +93,10 @@ def execute_backup(req: BackupRequest):
         raise HTTPException(status_code=500, detail=f"Failed to connect to Spark container: {ex}")
 
     if req.mode == "database":
-        cmd = f"/opt/spark/bin/spark-submit /opt/spark/scripts/backup_restore_table.py backup-db --database {req.database}"
+        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup-db --database {req.database}"
     else:
         table_name = req.table or "sales"
-        cmd = f"/opt/spark/bin/spark-submit /opt/spark/scripts/backup_restore_table.py backup --table {req.database}.{table_name}"
+        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup --table {req.database}.{table_name}"
     
     if req.custom_backup_id and req.custom_backup_id.strip():
         cmd += f" --backup-id {req.custom_backup_id.strip()}"
@@ -123,10 +123,10 @@ def execute_restore(req: RestoreRequest):
         raise HTTPException(status_code=500, detail=f"Failed to connect to Spark container: {ex}")
 
     if req.mode == "database":
-        cmd = f"/opt/spark/bin/spark-submit /opt/spark/scripts/backup_restore_table.py restore-db --backup-id {req.backup_id} --database {req.target_database} --storage-dest {req.storage_dest}"
+        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore-db --backup-id {req.backup_id} --database {req.target_database} --storage-dest {req.storage_dest}"
     else:
-        target_tbl = req.target_table or ""
-        cmd = f"/opt/spark/bin/spark-submit /opt/spark/scripts/backup_restore_table.py restore --backup-id {req.backup_id} --target-table {target_tbl} --storage-dest {req.storage_dest}"
+        target_tbl_arg = f"--target-table {req.target_table}" if req.target_table else ""
+        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore --backup-id {req.backup_id} --database {req.target_database} {target_tbl_arg} --storage-dest {req.storage_dest}"
     
     res = spark_cont.exec_run(cmd)
     output = res.output.decode("utf-8", errors="ignore")
