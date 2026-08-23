@@ -456,6 +456,7 @@ export default function SparkTuning({ onProfileChange }) {
                         <div>Cores/Exec: <span className="text-amber-400 font-bold">{p.executor_cores}</span></div>
                         <div>Max Cores: <span className="text-amber-400 font-bold">{p.max_cores}</span></div>
                         <div>Partitions: <span className="text-indigo-400 font-bold">{p.shuffle_partitions || p.sql_shuffle_partitions}</span></div>
+                        <div>Allocation: <span className={`font-bold ${p.dynamic_allocation ? 'text-emerald-400' : 'text-slate-300'}`}>{p.dynamic_allocation ? 'DRA Auto' : 'Standalone'}</span></div>
                         <div>AQE Adaptive: <span className={`font-bold ${p.aqe_enabled ? 'text-emerald-400' : 'text-slate-400'}`}>{p.aqe_enabled ? 'ENABLED' : 'OFF'}</span></div>
                         <div>Off-Heap: <span className="text-purple-400 font-bold">{(p.offheap_enabled && p.offheap_size !== "0") ? p.offheap_size : 'OFF'}</span></div>
                         <div>Kryo: <span className="text-pink-400 font-bold">{p.kryo_serializer ? 'ON' : 'OFF'}</span></div>
