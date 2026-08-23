@@ -42,6 +42,13 @@ env/
 *.pid
 *.inprogress
 
+# Runtime Admin Panel state & telemetry
+admin_panel/*_jobs.json
+admin_panel/spark_tuning_config.json
+admin_panel/admin_panel/
+python_scripts/spark_tuning_config.json
+spark_tuning_config.json
+
 # IDE & OS files
 .idea/
 .vscode/
