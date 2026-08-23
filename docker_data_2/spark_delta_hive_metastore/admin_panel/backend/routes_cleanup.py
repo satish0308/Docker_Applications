@@ -131,6 +131,15 @@ def execute_clean_run():
         services_to_start = ["spark", "spark-worker", "hive", "livy", "jupyter", "minio", "pgadmin", "keycloak", "hue"]
         subprocess.run(compose_base + ["up", "-d", "--no-deps"] + services_to_start, capture_output=True, text=True, timeout=180)
 
+        # Apply Hue database migrations
+        try:
+            time.sleep(2)
+            hue_c = client.containers.get("hue")
+            hue_c.exec_run("/usr/share/hue/build/env/bin/hue migrate")
+            logs.append("  • Applied Hue Django database migrations.")
+        except Exception as hue_mig_ex:
+            pass
+
         # 4. Wait for Spark and seed tables
         time.sleep(4)
         logs.append("📊 [Step 5/5] Lakehouse Tables: Provisioning seed Delta Lake tables (`default.sales`, `default.inventory_delta`)...")
