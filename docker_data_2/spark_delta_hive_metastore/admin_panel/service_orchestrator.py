@@ -379,10 +379,29 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
 
     return matrix
 
+def get_host_workspace_dir() -> str:
+    """Finds the actual host filesystem path for the workspace mount."""
+    try:
+        client = docker.from_env()
+        for cname in ["admin-panel", "spark_delta_hive_metastore-admin-panel-1"]:
+            try:
+                c = client.containers.get(cname)
+                for m in c.attrs.get("Mounts", []):
+                    if m.get("Destination") == "/workspace":
+                        return m.get("Source", "/workspace")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "/workspace"
+
 def get_compose_base_cmd() -> List[str]:
     """Returns the robust docker compose command with correct workspace context."""
     cmd = ["docker", "compose"]
-    if os.path.exists("/workspace/docker-compose.yml"):
+    host_ws = get_host_workspace_dir()
+    if host_ws and host_ws != "/workspace":
+        cmd.extend(["--project-directory", host_ws, "-f", "/workspace/docker-compose.yml"])
+    elif os.path.exists("/workspace/docker-compose.yml"):
         cmd.extend(["--project-directory", "/workspace", "-f", "/workspace/docker-compose.yml"])
     elif os.path.exists("/app/docker-compose.yml"):
         cmd.extend(["-f", "/app/docker-compose.yml"])
