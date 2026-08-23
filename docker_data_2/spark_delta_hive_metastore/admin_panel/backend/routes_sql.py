@@ -144,9 +144,18 @@ def submit_query(req: QueryRequest):
 
     return {"status": "SUBMITTED", "query_id": query_id, "job": new_job}
 
+@router.delete("/jobs/clear-all")
+def clear_all_jobs():
+    """Clears all historical query records."""
+    save_sql_query_jobs([])
+    return {"status": "SUCCESS", "message": "Query history cleared."}
+
 @router.delete("/jobs/{query_id}")
 def delete_job(query_id: str):
     """Removes a query record from history."""
+    if query_id == "clear-all":
+        save_sql_query_jobs([])
+        return {"status": "SUCCESS", "message": "Query history cleared."}
     jobs = load_sql_query_jobs()
     updated = [j for j in jobs if j["query_id"] != query_id]
     save_sql_query_jobs(updated)

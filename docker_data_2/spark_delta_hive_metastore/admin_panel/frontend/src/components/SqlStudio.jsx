@@ -70,6 +70,18 @@ export default function SqlStudio() {
     if (e) e.stopPropagation();
     try {
       await fetch(`/api/sql/jobs/${queryId}`, { method: 'DELETE' });
+      if (expandedId === queryId) setExpandedId(null);
+      fetchJobs();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleClearAllJobs = async () => {
+    if (!window.confirm("Are you sure you want to clear all query execution history?")) return;
+    try {
+      await fetch('/api/sql/jobs/clear-all', { method: 'DELETE' });
+      setExpandedId(null);
       fetchJobs();
     } catch (err) {
       console.error(err);
@@ -202,9 +214,20 @@ AS SELECT 1 AS id, 'Retail' AS category, 250.00 AS amount;`
             <Layers className="w-4 h-4 text-sky-400" />
             Query Execution Audit & History ({completedJobs.length})
           </h3>
-          <span className="text-[11px] text-slate-400 font-mono">
-            Latest query auto-expanded • click older queries to inspect
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearAllJobs}
+              disabled={completedJobs.length === 0}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold border border-white/10 flex items-center gap-1.5 transition disabled:opacity-40"
+              title="Clear all query execution history"
+            >
+              <Eraser className="w-3.5 h-3.5 text-rose-400" />
+              Clear History
+            </button>
+            <span className="text-[11px] text-slate-400 font-mono hidden md:inline">
+              Latest query auto-expanded • click older queries to inspect
+            </span>
+          </div>
         </div>
 
         {completedJobs.length === 0 ? (
