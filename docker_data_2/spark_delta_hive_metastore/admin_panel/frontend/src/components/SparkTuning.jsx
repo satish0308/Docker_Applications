@@ -150,12 +150,12 @@ export default function SparkTuning({ onProfileChange }) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 rounded-xl bg-slate-900/80 border border-white/10">
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-300">Target Worker Containers (1 – 4):</label>
+            <label className="text-xs font-semibold text-slate-300">Target Worker Containers (1 – 8):</label>
             <div className="flex items-center gap-3">
               <input
                 type="range"
                 min="1"
-                max="4"
+                max="8"
                 value={targetWorkers}
                 onChange={(e) => setTargetWorkers(parseInt(e.target.value))}
                 className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
