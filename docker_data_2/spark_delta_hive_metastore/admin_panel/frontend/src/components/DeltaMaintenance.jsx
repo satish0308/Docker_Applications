@@ -10,19 +10,25 @@ import {
   CheckCircle2, 
   AlertCircle, 
   Loader2, 
-  Database,
-  Calendar,
-  FileText,
-  RefreshCw,
-  Table as TableIcon
+  Database, 
+  Calendar, 
+  FileText, 
+  RefreshCw, 
+  Table as TableIcon,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
 
 export default function DeltaMaintenance() {
   const [catalogTables, setCatalogTables] = useState([]);
   const [databases, setDatabases] = useState(['default']);
   const [selectedDb, setSelectedDb] = useState('default');
-  const [selectedTable, setSelectedTable] = useState('sales');
+  const [selectedTable, setSelectedTable] = useState('inventory_delta');
   const [activeTab, setActiveTab] = useState('history'); // 'history', 'optimize', 'vacuum', 'restore'
+
+  // Convert state
+  const [convertLoading, setConvertLoading] = useState(false);
+  const [convertMsg, setConvertMsg] = useState(null);
 
   // History / Snapshot state
   const [historyLog, setHistoryLog] = useState(null);
@@ -82,6 +88,44 @@ export default function DeltaMaintenance() {
 
   const targetFullTable = `${selectedDb}.${selectedTable}`;
 
+  // Check table format from catalog metadata
+  const selectedTableObj = catalogTables.find(t => 
+    (t.database_name || t.Database || 'default') === selectedDb &&
+    (t.table_name || t['Table Name']) === selectedTable
+  );
+
+  const isDeltaTable = Boolean(
+    selectedTableObj?.format?.toLowerCase() === 'delta' ||
+    selectedTableObj?.Provider?.toLowerCase() === 'delta' ||
+    selectedTable?.includes('delta') ||
+    selectedTable === 'rfid'
+  );
+
+  const handleConvertToDelta = async () => {
+    if (!selectedTable) return;
+    setConvertLoading(true);
+    setConvertMsg(null);
+    try {
+      const res = await fetch('/api/delta/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          database: selectedDb,
+          table: selectedTable
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Conversion failed");
+      setConvertMsg({ type: 'success', text: `🎉 Table '${targetFullTable}' converted to Delta Lake format with ACID transaction log!` });
+      await fetchTables();
+      handleFetchHistory();
+    } catch (err) {
+      setConvertMsg({ type: 'error', text: `Conversion error: ${err.message}` });
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
   const handleFetchHistory = async () => {
     if (!selectedTable) return;
     setHistoryLoading(true);
@@ -90,7 +134,7 @@ export default function DeltaMaintenance() {
       const res = await fetch(`/api/delta/history/${selectedDb}/${selectedTable}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to fetch history");
-      setHistoryLog(data.history_output);
+      setHistoryLog(data.history_output || "Transaction history returned 0 commits.");
     } catch (err) {
       setHistoryLog(`Error: ${err.message}`);
     } finally {
@@ -174,7 +218,7 @@ export default function DeltaMaintenance() {
         body: JSON.stringify({
           database: selectedDb,
           table: selectedTable,
-          target_version: parseInt(restoreVersion) || 0
+          version: parseInt(restoreVersion) || 0
         })
       });
       const data = await res.json();
@@ -191,296 +235,337 @@ export default function DeltaMaintenance() {
     <div className="space-y-6">
       
       {/* Header Banner */}
-      <div className="glass-card p-6 border-l-4 border-l-amber-500">
-        <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
-          ⏳ Delta Lake Time-Travel, Z-Ordering & VACUUM Maintenance
-        </h2>
-        <p className="text-xs text-slate-300 mt-1 max-w-3xl">
-          Inspect ACID commit logs, query historic table snapshots with point-in-time time-travel (<code>VERSION AS OF</code>), execute file compaction & multidimensional Z-Ordering, reclaim dead storage, and perform in-place rollbacks.
-        </p>
+      <div className="glass-card p-6 border-l-4 border-l-amber-500 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+            ⏳ Delta Lake Time-Travel, Z-Ordering & VACUUM Maintenance
+          </h2>
+          <p className="text-xs text-slate-300 mt-1 max-w-3xl">
+            Inspect ACID commit logs, query historic table snapshots with point-in-time time-travel (<code>VERSION AS OF</code>), execute file compaction & multidimensional Z-Ordering, reclaim dead storage, and perform in-place rollbacks.
+          </p>
+        </div>
+
+        <button
+          onClick={fetchTables}
+          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition self-start md:self-auto"
+          title="Refresh Metastore Tables"
+        >
+          <RefreshCw className="w-4 h-4 text-amber-400" />
+        </button>
       </div>
 
-      {/* CASCADING DATABASE & TABLE SELECTOR */}
-      <div className="glass-card p-6 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Database className="w-4 h-4 text-amber-400" />
-              Target Lakehouse Database & Delta Table
-            </label>
-            <div className="text-[11px] text-slate-400">
-              Selected Target: <span className="font-mono text-amber-300 font-bold">{targetFullTable}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Step 1: Database Dropdown */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Database:</span>
+      {/* Target Table Selector & In-Place Conversion Bar */}
+      <div className="glass-card p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-wrap flex-1">
+            <div>
+              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Database</label>
               <select
                 value={selectedDb}
                 onChange={(e) => setSelectedDb(e.target.value)}
-                className="bg-transparent text-xs font-mono font-bold text-white focus:outline-none"
+                className="bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
               >
                 {databases.map(db => (
-                  <option key={db} value={db} className="bg-slate-900">{db}</option>
+                  <option key={db} value={db}>{db}</option>
                 ))}
               </select>
             </div>
 
-            {/* Step 2: Table Dropdown / Autocomplete */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Table:</span>
-              {tablesForSelectedDb.length > 0 ? (
-                <select
-                  value={selectedTable}
-                  onChange={(e) => setSelectedTable(e.target.value)}
-                  className="bg-transparent text-xs font-mono font-bold text-sky-300 focus:outline-none"
-                >
-                  {tablesForSelectedDb.map(tbl => (
-                    <option key={tbl} value={tbl} className="bg-slate-900">{tbl}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={selectedTable}
-                  onChange={(e) => setSelectedTable(e.target.value)}
-                  placeholder="e.g. sales"
-                  className="bg-transparent text-xs font-mono font-bold text-sky-300 focus:outline-none w-28"
-                />
-              )}
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Target Metastore Table</label>
+              <select
+                value={selectedTable}
+                onChange={(e) => setSelectedTable(e.target.value)}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              >
+                {tablesForSelectedDb.map(tbl => (
+                  <option key={tbl} value={tbl}>{tbl}</option>
+                ))}
+              </select>
             </div>
+          </div>
 
+          {/* 1-Click In-Place Convert to Delta Button */}
+          <div className="flex items-end">
             <button
-              onClick={fetchTables}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-300 hover:text-white transition"
-              title="Refresh Metastore Tables"
+              onClick={handleConvertToDelta}
+              disabled={convertLoading}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 disabled:opacity-50"
+              title="Runs 'CONVERT TO DELTA' in-place without rewriting underlying parquet files"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              {convertLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Converting to Delta Lake...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5" />
+                  Convert '{selectedTable}' to Delta Lake
+                </>
+              )}
             </button>
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-t border-white/10 pt-4 overflow-x-auto">
-          {[
-            { id: 'history', label: '📜 ACID Commit History', icon: Clock },
-            { id: 'snapshot', label: '🕰️ Time-Travel Snapshot', icon: Calendar },
-            { id: 'optimize', label: '⚡ OPTIMIZE & Z-Order', icon: Sparkles },
-            { id: 'vacuum', label: '🧹 VACUUM Garbage Collection', icon: Trash2 },
-            { id: 'restore', label: '🔄 In-Place Rollback', icon: RotateCcw }
-          ].map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 flex-shrink-0 ${
-                  isActive 
-                    ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20' 
-                    : 'bg-slate-900/60 text-slate-400 hover:text-white border border-white/5'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+        {convertMsg && (
+          <div className={`p-3 rounded-xl text-xs font-semibold border ${
+            convertMsg.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+          }`}>
+            {convertMsg.text}
+          </div>
+        )}
       </div>
 
-      {/* TAB CONTENTS */}
+      {/* SUB-TABS NAVIGATION */}
+      <div className="flex items-center gap-2 border-b border-white/10 pb-2">
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'history' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-white bg-slate-900/50'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          ACID Commit History
+        </button>
 
-      {/* TAB 1: COMMIT HISTORY */}
+        <button
+          onClick={() => setActiveTab('optimize')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'optimize' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-white bg-slate-900/50'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          File Compaction & Z-Ordering
+        </button>
+
+        <button
+          onClick={() => setActiveTab('vacuum')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'vacuum' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-white bg-slate-900/50'
+          }`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          VACUUM Storage Reclamation
+        </button>
+
+        <button
+          onClick={() => setActiveTab('restore')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'restore' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-white bg-slate-900/50'
+          }`}
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Point-in-Time Rollback
+        </button>
+      </div>
+
+      {/* TAB 1: HISTORY & TIME-TRAVEL */}
       {activeTab === 'history' && (
-        <div className="glass-card p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400" />
-              ACID Commit Audit Trail & Lineage
-            </h3>
-            <button
-              onClick={handleFetchHistory}
-              disabled={historyLoading}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition disabled:opacity-50"
-            >
-              {historyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-              Fetch Commit History
-            </button>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* HISTORY INSPECTOR */}
+          <div className="lg:col-span-7 glass-card p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  DESCRIBE HISTORY {targetFullTable}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Inspect transactional commit logs, operations, timestamps, and user provenance.
+                </p>
+              </div>
+              <button
+                onClick={handleFetchHistory}
+                disabled={historyLoading}
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+              >
+                {historyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-white" />}
+                Inspect Log
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950/90 font-mono text-xs text-amber-300 border border-white/5 max-h-96 overflow-y-auto whitespace-pre custom-scrollbar">
+              {historyLog || "Click 'Inspect Log' to view transactional history of commits."}
+            </div>
           </div>
 
-          {historyLog ? (
-            <div className="p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-amber-300 max-h-[480px] overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-              {historyLog}
-            </div>
-          ) : (
-            <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/40 rounded-xl border border-white/5">
-              Click "Fetch Commit History" to inspect transaction logs for <code>{targetFullTable}</code>.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: TIME TRAVEL SNAPSHOT */}
-      {activeTab === 'snapshot' && (
-        <div className="glass-card p-6 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-white">Point-In-Time Historical Snapshot</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Executes <code>SELECT * FROM {targetFullTable} VERSION AS OF {versionInput} LIMIT 50;</code></p>
+          {/* POINT-IN-TIME SNAPSHOT QUERY */}
+          <div className="lg:col-span-5 glass-card p-6 space-y-4">
+            <div className="border-b border-white/5 pb-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                <Search className="w-4 h-4 text-sky-400" />
+                Query Historical Snapshot
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Query table at exact historical version: <code>VERSION AS OF {'{version}'}</code>.
+              </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-slate-900 border border-white/10 px-3 py-1.5 rounded-xl">
-                <span className="text-xs text-slate-400 font-mono">Version:</span>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Target Version Index</label>
                 <input
                   type="number"
-                  value={versionInput}
-                  onChange={(e) => setVersionInput(e.target.value)}
-                  className="w-16 bg-transparent text-xs font-mono font-bold text-white focus:outline-none"
                   min="0"
+                  value={versionInput}
+                  onChange={(e) => setVersionInput(parseInt(e.target.value) || 0)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
 
               <button
                 onClick={handleFetchSnapshot}
                 disabled={snapshotLoading}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition disabled:opacity-50"
+                className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50"
               >
-                {snapshotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-                Query Snapshot
+                {snapshotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                Query Version {versionInput}
               </button>
+
+              <div className="p-3 rounded-xl bg-slate-950 font-mono text-xs text-sky-300 border border-white/5 max-h-60 overflow-y-auto whitespace-pre custom-scrollbar">
+                {snapshotData || "Results of historical snapshot query will appear here."}
+              </div>
             </div>
           </div>
 
-          {snapshotData && (
-            <div className="p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-sky-300 max-h-[480px] overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-              {snapshotData}
-            </div>
-          )}
         </div>
       )}
 
-      {/* TAB 3: OPTIMIZE & Z-ORDER */}
+      {/* TAB 2: OPTIMIZE & Z-ORDER */}
       {activeTab === 'optimize' && (
-        <div className="glass-card p-6 space-y-4">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            File Compaction & Multidimensional Z-Ordering
-          </h3>
-          <p className="text-xs text-slate-300">
-            Compacts small Apache Parquet files into optimal ~1GB file sizes and co-locates multidimensional data points for up to <b>10x query speedups</b>.
-          </p>
-
-          <div className="space-y-2 pt-2">
-            <label className="text-xs font-bold text-slate-400">Z-Order Columns (Comma separated, optional):</label>
-            <input
-              type="text"
-              value={zorderCols}
-              onChange={(e) => setZorderCols(e.target.value)}
-              placeholder="e.g. store_id, timestamp"
-              className="w-full bg-slate-900 border border-white/15 rounded-xl px-4 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
-            />
+        <div className="glass-card p-6 space-y-5">
+          <div className="border-b border-white/5 pb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              File Compaction & Multidimensional Z-Ordering
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              Compacts small Apache Parquet files into optimal ~1GB file sizes and co-locates multidimensional data points for up to 10x query speedups.
+            </p>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="space-y-4 max-w-xl">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Z-Order Columns (Comma separated, optional):
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. store_id, timestamp"
+                value={zorderCols}
+                onChange={(e) => setZorderCols(e.target.value)}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
             <button
               onClick={handleOptimize}
               disabled={optimizeLoading}
-              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition disabled:opacity-50"
+              className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-amber-600/30 disabled:opacity-50"
             >
-              {optimizeLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 fill-current" />}
+              {optimizeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               ⚡ Run OPTIMIZE
             </button>
           </div>
 
           {optimizeResult && (
-            <div className="p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-emerald-300 whitespace-pre-wrap">
-              {JSON.stringify(optimizeResult, null, 2)}
+            <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-amber-300 whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar">
+              {optimizeResult.error ? `Error: ${optimizeResult.error}` : optimizeResult.output}
             </div>
           )}
         </div>
       )}
 
-      {/* TAB 4: VACUUM */}
+      {/* TAB 3: VACUUM STORAGE RECLAMATION */}
       {activeTab === 'vacuum' && (
-        <div className="glass-card p-6 space-y-4">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
-            <Trash2 className="w-4 h-4 text-amber-400" />
-            VACUUM Garbage Collection & Dead File Purge
-          </h3>
-          <p className="text-xs text-slate-300">
-            Reclaims underlying HDFS/S3 storage capacity by deleting obsolete Parquet files no longer referenced by the Delta transaction log.
-          </p>
+        <div className="glass-card p-6 space-y-5">
+          <div className="border-b border-white/5 pb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              VACUUM Storage Reclamation
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              Deletes data files no longer referenced by the latest Delta transaction log that are older than the retention threshold.
+            </p>
+          </div>
 
-          <div className="flex items-center gap-3 pt-2">
-            <div className="flex items-center gap-2 bg-slate-900 border border-white/15 px-3.5 py-2 rounded-xl">
-              <span className="text-xs text-slate-400 font-mono">Retention Hours:</span>
-              <input
-                type="number"
+          <div className="space-y-4 max-w-xl">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Retention Window (Hours):
+              </label>
+              <select
                 value={retentionHours}
-                onChange={(e) => setRetentionHours(e.target.value)}
-                className="w-20 bg-transparent text-xs font-mono font-bold text-white focus:outline-none"
-                min="0"
-              />
+                onChange={(e) => setRetentionHours(parseInt(e.target.value) || 168)}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-rose-500"
+              >
+                <option value={168}>168 Hours (7 Days - Standard Recommended)</option>
+                <option value={72}>72 Hours (3 Days)</option>
+                <option value={24}>24 Hours (1 Day)</option>
+                <option value={0}>0 Hours (Immediate Purge)</option>
+              </select>
             </div>
 
             <button
               onClick={handleVacuum}
               disabled={vacuumLoading}
-              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition disabled:opacity-50"
+              className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-rose-600/30 disabled:opacity-50"
             >
-              {vacuumLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              🧹 Run VACUUM
+              {vacuumLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Execute VACUUM
             </button>
           </div>
 
           {vacuumResult && (
-            <div className="p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-emerald-300 whitespace-pre-wrap">
-              {JSON.stringify(vacuumResult, null, 2)}
+            <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-rose-300 whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar">
+              {vacuumResult.error ? `Error: ${vacuumResult.error}` : (vacuumResult.output || "VACUUM completed successfully.")}
             </div>
           )}
         </div>
       )}
 
-      {/* TAB 5: IN-PLACE ROLLBACK */}
+      {/* TAB 4: POINT-IN-TIME ROLLBACK */}
       {activeTab === 'restore' && (
-        <div className="glass-card p-6 space-y-4 border border-rose-500/30">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-rose-400 flex items-center gap-2">
-            <RotateCcw className="w-4 h-4" />
-            In-Place ACID Version Rollback (RESTORE)
-          </h3>
-          <p className="text-xs text-slate-300">
-            Reverts <code>{targetFullTable}</code> instantaneously back to an earlier historical commit without full data duplication.
-          </p>
+        <div className="glass-card p-6 space-y-5">
+          <div className="border-b border-white/5 pb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-purple-400" />
+              Point-in-Time Table Rollback
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              Restores a Delta Lake table in-place to an earlier point-in-time version commit.
+            </p>
+          </div>
 
-          <div className="flex items-center gap-3 pt-2">
-            <div className="flex items-center gap-2 bg-slate-900 border border-white/15 px-3.5 py-2 rounded-xl">
-              <span className="text-xs text-slate-400 font-mono">Target Version:</span>
+          <div className="space-y-4 max-w-xl">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Target Version to Rollback To:
+              </label>
               <input
                 type="number"
-                value={restoreVersion}
-                onChange={(e) => setRestoreVersion(e.target.value)}
-                className="w-20 bg-transparent text-xs font-mono font-bold text-white focus:outline-none"
                 min="0"
+                value={restoreVersion}
+                onChange={(e) => setRestoreVersion(parseInt(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
               />
             </div>
 
             <button
               onClick={handleRestore}
               disabled={restoreLoading}
-              className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 transition disabled:opacity-50"
+              className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-purple-600/30 disabled:opacity-50"
             >
-              {restoreLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-              🔄 Execute In-Place Restore
+              {restoreLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+              Rollback Table to Version {restoreVersion}
             </button>
           </div>
 
           {restoreResult && (
-            <div className="p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-emerald-300 whitespace-pre-wrap">
-              {JSON.stringify(restoreResult, null, 2)}
+            <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-white/10 font-mono text-xs text-purple-300 whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar">
+              {restoreResult.error ? `Error: ${restoreResult.error}` : (restoreResult.output || `Table rolled back to version ${restoreVersion}.`)}
             </div>
           )}
         </div>
