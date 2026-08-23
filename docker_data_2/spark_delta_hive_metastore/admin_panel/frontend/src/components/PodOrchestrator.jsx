@@ -15,7 +15,10 @@ import {
   Loader2,
   Clock,
   Check,
-  X
+  X,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 export default function PodOrchestrator({ services, presets, onRefresh }) {
@@ -23,6 +26,10 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
   const [selectedCustom, setSelectedCustom] = useState(["hue"]);
   const [resolvedChain, setResolvedChain] = useState([]);
   const [tierFilter, setTierFilter] = useState("All Tiers");
+
+  // Interactive Column Sorting State
+  const [sortColumn, setSortColumn] = useState('status'); // 'name', 'compose_service', 'status', 'ram', 'port'
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
 
   // Live Streaming Pipeline State
   const [activePipeline, setActivePipeline] = useState(null); // { title: string, total: number, nodes: [], currentStep: number, logs: [], isFinished: boolean }
@@ -42,6 +49,23 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
       setResolvedChain([]);
     }
   }, [selectedCustom]);
+
+  const handleSort = (column) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const parseRamToMb = (ramStr) => {
+    if (!ramStr) return 0;
+    const num = parseFloat(ramStr);
+    if (isNaN(num)) return 0;
+    if (ramStr.toUpperCase().includes('GB')) return num * 1024;
+    return num;
+  };
 
   const runStreamingPipeline = async (url, payload, title) => {
     setActivePipeline({
@@ -152,7 +176,35 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
   const tiers = ["All Tiers", "Foundation & Metadata", "Compute Engines", "Interactive Studios", "Security & Management"];
   const filteredServices = tierFilter === "All Tiers" ? services : services.filter(s => s.tier === tierFilter);
 
+  // Sorting Logic
+  const sortedServices = [...filteredServices].sort((a, b) => {
+    let comp = 0;
+    if (sortColumn === 'name') {
+      comp = a.name.localeCompare(b.name);
+    } else if (sortColumn === 'compose_service') {
+      comp = (a.compose_service || '').localeCompare(b.compose_service || '');
+    } else if (sortColumn === 'status') {
+      const rankA = a.status === 'RUNNING' ? 1 : a.status === 'UNHEALTHY' ? 2 : 3;
+      const rankB = b.status === 'RUNNING' ? 1 : b.status === 'UNHEALTHY' ? 2 : 3;
+      comp = rankA - rankB;
+    } else if (sortColumn === 'ram') {
+      comp = parseRamToMb(a.est_ram) - parseRamToMb(b.est_ram);
+    } else if (sortColumn === 'port') {
+      comp = (parseInt(a.port) || 0) - (parseInt(b.port) || 0);
+    }
+    return sortDirection === 'asc' ? comp : -comp;
+  });
+
   const presetObj = presets[selectedPreset] || { desc: '', est_ram: '', services: [] };
+
+  const renderSortIcon = (column) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="w-3 h-3 text-slate-600 group-hover:text-slate-400 transition" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="w-3 h-3 text-indigo-400" />
+      : <ArrowDown className="w-3 h-3 text-indigo-400" />;
+  };
 
   return (
     <div className="space-y-6">
@@ -461,7 +513,7 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
             <h3 className="text-sm font-bold tracking-wide uppercase text-white flex items-center gap-2">
               📦 3. Live Cluster Service Fleet Matrix
             </h3>
-            <span className="text-xs text-slate-400">15 Distributed Big Data containers • Real-time Docker socket binding</span>
+            <span className="text-xs text-slate-400">15 Distributed Big Data containers • Click columns to sort by Status, RAM, Name</span>
           </div>
 
           {/* Architecture Tier Filters */}
@@ -480,18 +532,52 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
           </div>
         </div>
 
-        {/* Table Header */}
-        <div className="hidden lg:grid grid-cols-12 items-center px-4 py-2.5 rounded-xl bg-slate-950/80 border border-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-          <div className="col-span-5">Service & Details</div>
-          <div className="col-span-2">Container & Tier</div>
-          <div className="col-span-2">Live Status</div>
-          <div className="col-span-1">Port / RAM</div>
+        {/* Interactive Sortable Table Header */}
+        <div className="hidden lg:grid grid-cols-12 items-center px-4 py-2.5 rounded-xl bg-slate-950/80 border border-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider select-none">
+          
+          {/* Col 1: Service Name */}
+          <button 
+            onClick={() => handleSort('name')}
+            className="col-span-5 flex items-center gap-1.5 text-left hover:text-white transition group"
+          >
+            <span>Service & Details</span>
+            {renderSortIcon('name')}
+          </button>
+
+          {/* Col 2: Container & Tier */}
+          <button 
+            onClick={() => handleSort('compose_service')}
+            className="col-span-2 flex items-center gap-1.5 text-left hover:text-white transition group"
+          >
+            <span>Container & Tier</span>
+            {renderSortIcon('compose_service')}
+          </button>
+
+          {/* Col 3: Live Status */}
+          <button 
+            onClick={() => handleSort('status')}
+            className="col-span-2 flex items-center gap-1.5 text-left hover:text-white transition group"
+          >
+            <span>Live Status</span>
+            {renderSortIcon('status')}
+          </button>
+
+          {/* Col 4: Port & RAM */}
+          <button 
+            onClick={() => handleSort('ram')}
+            className="col-span-1 flex items-center gap-1.5 text-left hover:text-white transition group"
+          >
+            <span>Port / RAM</span>
+            {renderSortIcon('ram')}
+          </button>
+
+          {/* Col 5: Actions */}
           <div className="col-span-2 text-right">Lifecycle Actions</div>
         </div>
 
         {/* Containers List */}
         <div className="space-y-2">
-          {filteredServices.map(svc => {
+          {sortedServices.map(svc => {
             const isRunning = svc.status === "RUNNING";
             const isUnhealthy = svc.status === "UNHEALTHY";
 
