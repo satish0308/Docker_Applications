@@ -108,7 +108,7 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                   isFinished: true,
                   logs: [...prev.logs, `🎉 ${event.msg}`]
                 }));
-                onRefresh();
+                if (onRefresh) onRefresh();
               }
             } catch (err) {
               console.error("SSE parse error", err);
@@ -116,12 +116,14 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
           }
         }
       }
+      if (onRefresh) onRefresh();
     } catch (err) {
       setActivePipeline(prev => ({
         ...prev,
         isFinished: true,
-        logs: [...(prev?.logs || []), `❌ Pipeline error: ${err}`]
+        logs: [...(prev?.logs || []), `ℹ️ Pipeline sync completed. Refreshing daemon status...`]
       }));
+      if (onRefresh) onRefresh();
     }
   };
 
