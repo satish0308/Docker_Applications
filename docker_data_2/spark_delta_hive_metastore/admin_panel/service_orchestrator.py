@@ -353,6 +353,20 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                     health_stat = h_info.upper()
                     if h_info == "unhealthy":
                         status_label = "UNHEALTHY"
+                
+                # Verify port socket connectivity if healthy
+                target_port = meta.get("web_port", meta.get("port"))
+                target_host = meta.get("host", meta["compose_service"])
+                if target_port and isinstance(target_port, int):
+                    try:
+                        s = socket.create_connection((target_host, target_port), timeout=0.5)
+                        s.close()
+                        if health_stat == "N/A":
+                            health_stat = "HEALTHY"
+                    except Exception:
+                        health_stat = "STARTING / UNREACHABLE"
+                        status_label = "DEGRADED"
+                
                 started = matched_container.attrs.get("State", {}).get("StartedAt", "")
                 uptime = started[:19].replace("T", " ") if started else "Running"
             elif stat == "restarting":

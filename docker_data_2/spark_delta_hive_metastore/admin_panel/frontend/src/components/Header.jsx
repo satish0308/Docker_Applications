@@ -13,11 +13,13 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
 
   const isServiceRunning = (key) => {
     const svc = services.find(s => 
+      s.key === key ||
       s.compose_service === key || 
       (s.name && s.name.toLowerCase().includes(key.toLowerCase())) ||
-      (s.container_name && s.container_name.toLowerCase().includes(key.toLowerCase()))
+      (s.container_name && s.container_name.toLowerCase().includes(key.toLowerCase())) ||
+      (s.container && s.container.toLowerCase().includes(key.toLowerCase()))
     );
-    return svc ? svc.status === 'RUNNING' : false;
+    return svc ? (svc.status === 'RUNNING' && svc.health !== 'UNHEALTHY' && svc.health !== 'STARTING / UNREACHABLE' && svc.health !== 'DEGRADED') : false;
   };
 
   return (
