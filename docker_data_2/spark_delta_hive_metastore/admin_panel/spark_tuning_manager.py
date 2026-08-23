@@ -416,14 +416,19 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
             if ("spark-worker" in c.name or "spark_worker" in c.name)
         ]
         
-        template_worker = all_workers[0] if all_workers else None
-        if not template_worker:
-            return "No base spark-worker container found.", 1
+        # Image resolution
+        image_name = "spark_delta_hive_metastore-spark-worker:latest"
+        try:
+            for img in client.images.list():
+                for t in img.tags:
+                    if "spark-worker" in t:
+                        image_name = t
+                        break
+        except Exception:
+            pass
 
-        image_name = template_worker.image.tags[0] if template_worker.image.tags else template_worker.image.id
-        network_name = list(template_worker.attrs['NetworkSettings']['Networks'].keys())[0] if template_worker.attrs['NetworkSettings']['Networks'] else "hadoop-network"
-        binds = template_worker.attrs['HostConfig']['Binds'] or []
-        entrypoint = template_worker.attrs['Config']['Entrypoint'] or ["/home/sparkuser/start-spark2.sh"]
+        network_name = "hadoop-network"
+        entrypoint = ["/home/sparkuser/start-spark2.sh"]
 
         target_env = [
             "SPARK_MODE=worker",
@@ -432,22 +437,18 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
             f"SPARK_WORKER_MEMORY={worker_memory}"
         ]
 
-        vol_map = {}
-        for b in binds:
-            parts = b.split(":")
-            if len(parts) >= 2:
-                host_p = parts[0]
-                cont_p = parts[1]
-                mode = parts[2] if len(parts) > 2 else "rw"
-                vol_map[host_p] = {"bind": cont_p, "mode": mode}
-
-        # Always ensure /data is mounted into every spark-worker container
-        host_data_dir = "/home/satish/Docker_Applications/docker_data_2/spark_delta_hive_metastore/data"
-        vol_map[host_data_dir] = {"bind": "/data", "mode": "rw"}
+        from service_orchestrator import get_host_workspace_dir
+        host_ws = get_host_workspace_dir()
+        vol_map = {
+            os.path.join(host_ws, "config/spark-defaults.conf"): {"bind": "/opt/spark/conf/spark-defaults.conf", "mode": "ro"},
+            os.path.join(host_ws, "config/hive-site.xml"): {"bind": "/opt/spark/conf/hive-site.xml", "mode": "ro"},
+            os.path.join(host_ws, "config/core-site.xml"): {"bind": "/opt/spark/conf/core-site.xml", "mode": "ro"},
+            os.path.join(host_ws, "scripts/start-spark.sh"): {"bind": "/home/sparkuser/start-spark2.sh", "mode": "rw"},
+            os.path.join(host_ws, "data"): {"bind": "/data", "mode": "rw"}
+        }
 
         # Check if existing workers need re-provisioning due to RAM or Core change
         running_workers = [c for c in all_workers if c.status == "running"]
-        current_count = len(running_workers)
 
         # Remove all existing workers if sizing (RAM/Cores) changed
         sizing_changed = False
@@ -466,13 +467,11 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
                     pass
             all_workers = []
             running_workers = []
-            current_count = 0
 
         # Launch target_count workers with requested RAM and Cores
-        added = 0
         for i in range(1, target_count + 1):
             w_name = f"spark_delta_hive_metastore-spark-worker-{i}"
-            w_port = 8090 + i  # Worker 1: 8091, Worker 2: 8092, Worker 3: 8093... (Avoids pgadmin on 8081)
+            w_port = 8090 + i  # Worker 1: 8091, Worker 2: 8092, Worker 3: 8093...
             worker_env = target_env + [
                 f"SPARK_PUBLIC_DNS=localhost",
                 f"SPARK_WORKER_WEBUI_PORT=8081"
@@ -496,7 +495,6 @@ def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
                 volumes=vol_map,
                 entrypoint=entrypoint
             )
-            added += 1
 
         # Stop and remove any excess workers beyond target_count
         for i in range(target_count + 1, target_count + 20):

@@ -34,12 +34,12 @@ def get_tuning_config():
 @router.post("/scale-workers")
 def scale_workers(req: ScalingRequest):
     """Horizontally scales the Spark worker container fleet on-demand."""
-    success, msg = spark_tuning_manager.scale_cluster_workers(
+    msg, exit_code = spark_tuning_manager.scale_cluster_workers(
         target_count=req.worker_count,
         worker_memory=req.worker_ram,
         worker_cores=req.worker_cores
     )
-    if not success:
+    if exit_code != 0:
         raise HTTPException(status_code=500, detail=msg)
     return {"status": "SUCCESS", "message": msg}
 
