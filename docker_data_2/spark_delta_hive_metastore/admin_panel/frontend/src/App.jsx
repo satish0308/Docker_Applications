@@ -9,6 +9,11 @@ import TerminalLogs from './components/TerminalLogs';
 import Diagnostics from './components/Diagnostics';
 import ClusterHealth from './components/ClusterHealth';
 import DeltaMaintenance from './components/DeltaMaintenance';
+import BackupRestore from './components/BackupRestore';
+import DataIngestion from './components/DataIngestion';
+import ScheduledJobs from './components/ScheduledJobs';
+import SystemCleanup from './components/SystemCleanup';
+import Documentation from './components/Documentation';
 
 export default function App() {
   const [activeTab, setActiveTabState] = useState(() => {
@@ -96,6 +101,21 @@ export default function App() {
 
         {/* Dynamic Content Viewport */}
         <main className="flex-1 p-8 overflow-y-auto custom-scrollbar">
+          
+          {/* SUITE 1: DATA OPS & INGESTION */}
+          {activeTab === 'ingestion' && (
+            <DataIngestion />
+          )}
+
+          {activeTab === 'scheduled_jobs' && (
+            <ScheduledJobs />
+          )}
+
+          {activeTab === 'delta_time' && (
+            <DeltaMaintenance />
+          )}
+
+          {/* SUITE 2: COMPUTE & SQL STUDIO */}
           {activeTab === 'orchestrator' && (
             <PodOrchestrator services={services} presets={presets} onRefresh={fetchMatrix} />
           )}
@@ -108,35 +128,37 @@ export default function App() {
             <SparkTuning onProfileChange={setActiveProfile} />
           )}
 
+          {activeTab === 'diagnostics' && (
+            <Diagnostics />
+          )}
+
+          {/* SUITE 3: STORAGE & METASTORE */}
           {activeTab === 'metastore' && (
             <MetastoreCatalog />
+          )}
+
+          {activeTab === 'backup' && (
+            <BackupRestore />
+          )}
+
+          {/* SUITE 4: SYSTEM OBSERVABILITY */}
+          {activeTab === 'health' && (
+            <ClusterHealth services={services} onRefresh={fetchMatrix} />
           )}
 
           {activeTab === 'logs' && (
             <TerminalLogs services={services} />
           )}
 
-          {activeTab === 'diagnostics' && (
-            <Diagnostics />
+          {activeTab === 'purge' && (
+            <SystemCleanup />
           )}
 
-          {activeTab === 'health' && (
-            <ClusterHealth services={services} onRefresh={fetchMatrix} />
+          {/* SUITE 5: KNOWLEDGE BASE */}
+          {activeTab === 'docs' && (
+            <Documentation />
           )}
 
-          {activeTab === 'delta_time' && (
-            <DeltaMaintenance />
-          )}
-
-          {['ingestion', 'backup', 'purge', 'docs'].includes(activeTab) && (
-            <div className="glass-card p-12 text-center space-y-3">
-              <div className="text-3xl">🚀</div>
-              <h3 className="text-lg font-bold text-white capitalize">{activeTab.replace('_', ' ')} Studio</h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Ready for next-generation decoupled pipeline execution. All backend FastAPI endpoints are live on port 8501.
-              </p>
-            </div>
-          )}
         </main>
 
       </div>

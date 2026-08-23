@@ -19,6 +19,9 @@ from backend.routes_tuning import router as tuning_router
 from backend.routes_metastore import router as metastore_router
 from backend.routes_diagnostics import router as diagnostics_router
 from backend.routes_delta import router as delta_router
+from backend.routes_backup import router as backup_router
+from backend.routes_schedule import router as schedule_router
+from backend.routes_cleanup import router as cleanup_router
 
 app = FastAPI(
     title="BDP Platform Studio • Enterprise SaaS Control Engine",
@@ -43,6 +46,9 @@ app.include_router(tuning_router)
 app.include_router(metastore_router)
 app.include_router(diagnostics_router)
 app.include_router(delta_router)
+app.include_router(backup_router)
+app.include_router(schedule_router)
+app.include_router(cleanup_router)
 
 @app.on_event("startup")
 async def startup_event():
