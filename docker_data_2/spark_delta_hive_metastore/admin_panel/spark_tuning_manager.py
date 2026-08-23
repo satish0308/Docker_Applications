@@ -127,6 +127,10 @@ def update_spark_defaults_conf(params):
                 dra_bool = params.get("dynamic_allocation", True)
                 exe_cores = str(params.get("executor_cores", 2))
                 max_cores = str(params.get("max_cores", 4))
+                offheap_bool = params.get("offheap_enabled", False)
+                offheap_sz = str(params.get("offheap_size", "0"))
+                kryo_bool = params.get("kryo_serializer", True)
+
                 tune_map = {
                     "spark.driver.memory": str(params.get("driver_memory", "2g")),
                     "spark.executor.memory": str(params.get("executor_memory", "4g")),
@@ -141,6 +145,9 @@ def update_spark_defaults_conf(params):
                     "spark.sql.adaptive.coalescePartitions.enabled": "true" if params.get("aqe_coalesce", True) else "false",
                     "spark.memory.fraction": str(params.get("memory_fraction", 0.7)),
                     "spark.memory.storageFraction": str(params.get("storage_fraction", 0.5)),
+                    "spark.memory.offHeap.enabled": "true" if (offheap_bool and offheap_sz not in ["0", "0g", "0m", ""]) else "false",
+                    "spark.memory.offHeap.size": offheap_sz if offheap_bool else "0",
+                    "spark.serializer": "org.apache.spark.serializer.KryoSerializer" if kryo_bool else "org.apache.spark.serializer.JavaSerializer",
                     "spark.network.timeout": "800s",
                     "spark.executor.heartbeatInterval": "60s",
                     "spark.sql.broadcastTimeout": "1800",

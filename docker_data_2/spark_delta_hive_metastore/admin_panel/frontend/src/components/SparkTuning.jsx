@@ -24,22 +24,31 @@ export default function SparkTuning({ onProfileChange }) {
   const [configData, setConfigData] = useState(null);
   const [selectedProfileKey, setSelectedProfileKey] = useState('🔴 Heavy (Large Big Data / >10M Rows)');
   
-  // Custom Fine-Grained Parameters State
-  const [customParams, setCustomParams] = useState({
-    driver_memory: "4g",
-    executor_memory: "8g",
-    executor_cores: 4,
-    max_cores: 8,
-    dynamic_allocation: true,
-    shuffle_partitions: 200,
-    aqe_enabled: true,
-    aqe_coalesce: true,
-    memory_fraction: 0.8,
-    storage_fraction: 0.4,
-    offheap_enabled: true,
-    offheap_size: "1g",
-    kryo_serializer: true
+  // Custom Fine-Grained Parameters State with LocalStorage & Server-State Retention
+  const [customParams, setCustomParams] = useState(() => {
+    const saved = localStorage.getItem('spark_custom_tuning_params');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {
+      driver_memory: "4g",
+      executor_memory: "8g",
+      executor_cores: 4,
+      max_cores: 8,
+      dynamic_allocation: true,
+      shuffle_partitions: 200,
+      aqe_enabled: true,
+      aqe_coalesce: true,
+      memory_fraction: 0.8,
+      storage_fraction: 0.4,
+      offheap_enabled: true,
+      offheap_size: "1g",
+      kryo_serializer: true
+    };
   });
+
+  const customInitializedRef = useRef(false);
+  const isEditingCustomRef = useRef(false);
 
   // Scaling Controls with LocalStorage & Server-State Retention
   const [targetWorkers, setTargetWorkers] = useState(() => {
@@ -63,7 +72,7 @@ export default function SparkTuning({ onProfileChange }) {
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const fetchConfig = async () => {
+  const fetchConfig = async (forceSync = false) => {
     try {
       const res = await fetch('/api/tuning/config');
       const data = await res.json();
@@ -71,8 +80,20 @@ export default function SparkTuning({ onProfileChange }) {
       if (data.active_profile) {
         setSelectedProfileKey(data.active_profile);
       }
-      if (data.active_params) {
-        setCustomParams(data.active_params);
+
+      // Only sync customParams on first load or on explicit user action, never during passive polling while user is editing
+      if ((!customInitializedRef.current || forceSync) && data.active_params) {
+        setCustomParams(prev => {
+          const merged = { ...prev, ...data.active_params };
+          // Clean offheap_size if disabled
+          if (!merged.offheap_enabled || merged.offheap_size === "0") {
+            merged.offheap_size = "1g"; // default standby size
+            merged.offheap_enabled = data.active_params.offheap_enabled ?? false;
+          }
+          localStorage.setItem('spark_custom_tuning_params', JSON.stringify(merged));
+          return merged;
+        });
+        customInitializedRef.current = true;
       }
 
       // Retain previously selected scaling values from server config on initial load
@@ -100,7 +121,7 @@ export default function SparkTuning({ onProfileChange }) {
 
   useEffect(() => {
     fetchConfig();
-    const interval = setInterval(fetchConfig, 4000);
+    const interval = setInterval(() => fetchConfig(false), 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -108,29 +129,52 @@ export default function SparkTuning({ onProfileChange }) {
     setSelectedProfileKey(presetKey);
     const presets = configData?.presets || {};
     if (presets[presetKey]) {
-      setCustomParams({
-        ...presets[presetKey],
-        dynamic_allocation: presets[presetKey].dynamic_allocation ?? true
-      });
+      const p = presets[presetKey];
+      const updated = {
+        ...p,
+        dynamic_allocation: p.dynamic_allocation ?? true,
+        offheap_enabled: Boolean(p.offheap_enabled),
+        offheap_size: (p.offheap_size && p.offheap_size !== "0") ? p.offheap_size : "1g"
+      };
+      setCustomParams(updated);
+      localStorage.setItem('spark_custom_tuning_params', JSON.stringify(updated));
     }
+  };
+
+  const updateParamField = (key, value) => {
+    isEditingCustomRef.current = true;
+    setCustomParams(prev => {
+      const next = { ...prev, [key]: value };
+      localStorage.setItem('spark_custom_tuning_params', JSON.stringify(next));
+      return next;
+    });
   };
 
   const handleApplyProfile = async (profileName, paramsToApply = null) => {
     setLoading(true);
     setMsg(null);
     try {
+      const payloadParams = paramsToApply || customParams;
+      // Normalize offheap size before sending
+      const normalizedParams = {
+        ...payloadParams,
+        offheap_size: payloadParams.offheap_enabled ? (payloadParams.offheap_size || "1g") : "0"
+      };
+
       const res = await fetch('/api/tuning/apply-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           profile_name: profileName,
-          custom_params: paramsToApply
+          custom_params: normalizedParams
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to apply profile");
+      
+      localStorage.setItem('spark_custom_tuning_params', JSON.stringify(payloadParams));
       setMsg({ type: 'success', text: `🎉 Tuning profile '${profileName}' successfully applied across Spark Master, Livy, and Hue!` });
-      fetchConfig();
+      await fetchConfig(true);
       if (onProfileChange) onProfileChange(profileName);
     } catch (ex) {
       setMsg({ type: 'error', text: `Failed: ${ex.message}` });
@@ -179,7 +223,7 @@ export default function SparkTuning({ onProfileChange }) {
       localStorage.setItem('spark_scaler_cores', targetCores.toString());
 
       setMsg({ type: 'success', text: `Worker fleet scaled to ${targetWorkers} nodes with ${targetRam} RAM & ${targetCores} Cores each!` });
-      fetchConfig();
+      fetchConfig(true);
     } catch (ex) {
       setMsg({ type: 'error', text: `Scaling Error: ${ex.message}` });
     } finally {
@@ -208,7 +252,7 @@ export default function SparkTuning({ onProfileChange }) {
       `  --conf spark.memory.storageFraction=${p.storage_fraction || 0.4}`;
 
     if (p.offheap_enabled) {
-      cmd += ` \\\n  --conf spark.memory.offHeap.enabled=true \\\n  --conf spark.memory.offHeap.size=${p.offheap_size || "1g"}`;
+      cmd += ` \\\n  --conf spark.memory.offHeap.enabled=true \\\n  --conf spark.memory.offHeap.size=${(p.offheap_size && p.offheap_size !== "0") ? p.offheap_size : "1g"}`;
     }
     if (p.kryo_serializer) {
       cmd += ` \\\n  --conf spark.serializer=org.apache.spark.serializer.KryoSerializer`;
@@ -303,7 +347,7 @@ export default function SparkTuning({ onProfileChange }) {
           </div>
 
           <button
-            onClick={fetchConfig}
+            onClick={() => fetchConfig(true)}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
             title="Poll Cluster State"
           >
@@ -413,7 +457,7 @@ export default function SparkTuning({ onProfileChange }) {
                         <div>Max Cores: <span className="text-amber-400 font-bold">{p.max_cores}</span></div>
                         <div>Partitions: <span className="text-indigo-400 font-bold">{p.shuffle_partitions || p.sql_shuffle_partitions}</span></div>
                         <div>AQE Adaptive: <span className={`font-bold ${p.aqe_enabled ? 'text-emerald-400' : 'text-slate-400'}`}>{p.aqe_enabled ? 'ENABLED' : 'OFF'}</span></div>
-                        <div>Off-Heap: <span className="text-purple-400 font-bold">{p.offheap_enabled ? p.offheap_size : 'OFF'}</span></div>
+                        <div>Off-Heap: <span className="text-purple-400 font-bold">{(p.offheap_enabled && p.offheap_size !== "0") ? p.offheap_size : 'OFF'}</span></div>
                         <div>Kryo: <span className="text-pink-400 font-bold">{p.kryo_serializer ? 'ON' : 'OFF'}</span></div>
                       </div>
                     </div>
@@ -466,11 +510,11 @@ export default function SparkTuning({ onProfileChange }) {
                   Fine-Grained Engine Parameter Tuner
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Directly adjust JVM heap fractions, concurrency, serialization, and shuffle partitions.
+                  Directly adjust JVM heap fractions, concurrency, serialization, off-heap cache, and shuffle partitions.
                 </p>
               </div>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                Live Hot-Reload
+                Persistent Hot-Reload
               </span>
             </div>
 
@@ -479,7 +523,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Driver Memory</label>
                 <select
                   value={customParams.driver_memory}
-                  onChange={(e) => setCustomParams({ ...customParams, driver_memory: e.target.value })}
+                  onChange={(e) => updateParamField('driver_memory', e.target.value)}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value="1g">1 GB (Interactive / Debug)</option>
@@ -495,7 +539,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Executor Memory</label>
                 <select
                   value={customParams.executor_memory}
-                  onChange={(e) => setCustomParams({ ...customParams, executor_memory: e.target.value })}
+                  onChange={(e) => updateParamField('executor_memory', e.target.value)}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value="2g">2 GB (Light / Fits in 4G Worker)</option>
@@ -512,7 +556,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Executor Cores</label>
                 <select
                   value={customParams.executor_cores}
-                  onChange={(e) => setCustomParams({ ...customParams, executor_cores: parseInt(e.target.value, 10) })}
+                  onChange={(e) => updateParamField('executor_cores', parseInt(e.target.value, 10))}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value={1}>1 Core per Executor</option>
@@ -526,7 +570,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Max Total Cluster Cores</label>
                 <select
                   value={customParams.max_cores}
-                  onChange={(e) => setCustomParams({ ...customParams, max_cores: parseInt(e.target.value, 10) })}
+                  onChange={(e) => updateParamField('max_cores', parseInt(e.target.value, 10))}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value={2}>2 Cores Total</option>
@@ -542,7 +586,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Shuffle Partitions</label>
                 <select
                   value={customParams.shuffle_partitions}
-                  onChange={(e) => setCustomParams({ ...customParams, shuffle_partitions: parseInt(e.target.value, 10) })}
+                  onChange={(e) => updateParamField('shuffle_partitions', parseInt(e.target.value, 10))}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value={8}>8 Partitions (Small &lt;100MB)</option>
@@ -557,7 +601,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Execution / Storage Fraction</label>
                 <select
                   value={customParams.memory_fraction}
-                  onChange={(e) => setCustomParams({ ...customParams, memory_fraction: parseFloat(e.target.value) })}
+                  onChange={(e) => updateParamField('memory_fraction', parseFloat(e.target.value))}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value={0.6}>0.6 (60% Execution Heap)</option>
@@ -574,7 +618,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <input
                   type="checkbox"
                   checked={customParams.dynamic_allocation}
-                  onChange={(e) => setCustomParams({ ...customParams, dynamic_allocation: e.target.checked })}
+                  onChange={(e) => updateParamField('dynamic_allocation', e.target.checked)}
                   className="w-4 h-4 text-sky-600 rounded bg-slate-950 border-white/20 focus:ring-0"
                 />
                 <span className="text-xs text-slate-200 font-semibold">Dynamic Resource Allocation (DRA)</span>
@@ -584,7 +628,7 @@ export default function SparkTuning({ onProfileChange }) {
                 <input
                   type="checkbox"
                   checked={customParams.aqe_enabled}
-                  onChange={(e) => setCustomParams({ ...customParams, aqe_enabled: e.target.checked })}
+                  onChange={(e) => updateParamField('aqe_enabled', e.target.checked)}
                   className="w-4 h-4 text-sky-600 rounded bg-slate-950 border-white/20 focus:ring-0"
                 />
                 <span className="text-xs text-slate-200 font-semibold">Adaptive Query Execution (AQE)</span>
@@ -594,21 +638,56 @@ export default function SparkTuning({ onProfileChange }) {
                 <input
                   type="checkbox"
                   checked={customParams.kryo_serializer}
-                  onChange={(e) => setCustomParams({ ...customParams, kryo_serializer: e.target.checked })}
+                  onChange={(e) => updateParamField('kryo_serializer', e.target.checked)}
                   className="w-4 h-4 text-sky-600 rounded bg-slate-950 border-white/20 focus:ring-0"
                 />
                 <span className="text-xs text-slate-200 font-semibold">Kryo Fast Serialization</span>
               </label>
 
-              <label className="flex items-center gap-2 p-3 rounded-xl bg-slate-900/90 border border-white/10 cursor-pointer hover:border-sky-500/40 transition">
-                <input
-                  type="checkbox"
-                  checked={customParams.offheap_enabled}
-                  onChange={(e) => setCustomParams({ ...customParams, offheap_enabled: e.target.checked, offheap_size: e.target.checked ? "1g" : "0" })}
-                  className="w-4 h-4 text-sky-600 rounded bg-slate-950 border-white/20 focus:ring-0"
-                />
-                <span className="text-xs text-slate-200 font-semibold">Off-Heap Memory ({customParams.offheap_size || '1g'})</span>
-              </label>
+              {/* Off-Heap Toggle with Inline Sizing Selector */}
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-white/10 space-y-2">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(customParams.offheap_enabled)}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        const defaultSize = (customParams.offheap_size && customParams.offheap_size !== "0") ? customParams.offheap_size : "1g";
+                        setCustomParams(prev => {
+                          const next = {
+                            ...prev,
+                            offheap_enabled: isChecked,
+                            offheap_size: isChecked ? defaultSize : "0"
+                          };
+                          localStorage.setItem('spark_custom_tuning_params', JSON.stringify(next));
+                          return next;
+                        });
+                      }}
+                      className="w-4 h-4 text-purple-600 rounded bg-slate-950 border-white/20 focus:ring-0"
+                    />
+                    <span className="text-xs text-slate-200 font-semibold">Off-Heap Memory</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${customParams.offheap_enabled ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-slate-800 text-slate-500'}`}>
+                    {customParams.offheap_enabled ? (customParams.offheap_size || '1g') : 'OFF'}
+                  </span>
+                </label>
+
+                {customParams.offheap_enabled && (
+                  <div className="pt-1">
+                    <select
+                      value={customParams.offheap_size || '1g'}
+                      onChange={(e) => updateParamField('offheap_size', e.target.value)}
+                      className="w-full bg-slate-950 border border-purple-500/40 rounded-lg px-2.5 py-1 text-xs font-mono text-purple-300 focus:outline-none"
+                    >
+                      <option value="1g">1 GB Off-Heap Cache (Standard)</option>
+                      <option value="2g">2 GB Off-Heap Cache (High)</option>
+                      <option value="4g">4 GB Off-Heap Cache (Extreme)</option>
+                      <option value="8g">8 GB Off-Heap Cache (Heavy Cluster)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
             </div>
 
             <button
