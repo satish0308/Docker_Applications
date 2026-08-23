@@ -26,12 +26,18 @@ class CompileCommandRequest(BaseModel):
 
 @router.get("/config")
 def get_tuning_config():
-    """Returns the current active tuning profile, active params, cluster metrics, presets, and connection strings."""
+    """Returns the current active tuning profile, active params, worker fleet scaling settings, cluster metrics, presets, and connection strings."""
     cfg = spark_tuning_manager.load_tuning_config()
     metrics = spark_tuning_manager.get_spark_master_metrics()
     active_profile_name = cfg.get("active_profile", "🔴 Heavy (Large Big Data / >10M Rows)")
     active_params = cfg.get("params", spark_tuning_manager.PROFILES.get("🔴 Heavy (Large Big Data / >10M Rows)", {}))
     
+    worker_scaling = cfg.get("worker_scaling", {
+        "worker_count": metrics.get("alive_workers", 4) or 4,
+        "worker_ram": "4G",
+        "worker_cores": 4
+    })
+
     connections = {
         "spark_rpc": "spark://spark:7077",
         "spark_master_ui": "http://localhost:8089",
@@ -45,6 +51,7 @@ def get_tuning_config():
         "active_profile": active_profile_name,
         "active_params": active_params,
         "config": cfg,
+        "worker_scaling": worker_scaling,
         "metrics": metrics,
         "presets": spark_tuning_manager.PROFILES,
         "connections": connections
@@ -52,7 +59,7 @@ def get_tuning_config():
 
 @router.post("/scale-workers")
 def scale_workers(req: ScalingRequest):
-    """Horizontally scales the Spark worker container fleet on-demand."""
+    """Horizontally scales the Spark worker container fleet on-demand and persists settings."""
     msg, exit_code = spark_tuning_manager.scale_cluster_workers(
         target_count=req.worker_count,
         worker_memory=req.worker_ram,

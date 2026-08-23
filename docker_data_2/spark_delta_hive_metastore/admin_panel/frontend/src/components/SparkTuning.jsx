@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Cpu, 
   HardDrive, 
@@ -41,10 +41,21 @@ export default function SparkTuning({ onProfileChange }) {
     kryo_serializer: true
   });
 
-  // Scaling Controls
-  const [targetWorkers, setTargetWorkers] = useState(1);
-  const [targetRam, setTargetRam] = useState("4G");
-  const [targetCores, setTargetCores] = useState(4);
+  // Scaling Controls with LocalStorage & Server-State Retention
+  const [targetWorkers, setTargetWorkers] = useState(() => {
+    const saved = localStorage.getItem('spark_scaler_workers');
+    return saved ? parseInt(saved, 10) : 4;
+  });
+  const [targetRam, setTargetRam] = useState(() => {
+    const saved = localStorage.getItem('spark_scaler_ram');
+    return saved || '4G';
+  });
+  const [targetCores, setTargetCores] = useState(() => {
+    const saved = localStorage.getItem('spark_scaler_cores');
+    return saved ? parseInt(saved, 10) : 4;
+  });
+
+  const scalerInitializedRef = useRef(false);
 
   // UI State
   const [activeSubTab, setActiveSubTab] = useState('profiles'); // 'profiles' | 'custom' | 'telemetry' | 'connections'
@@ -63,8 +74,24 @@ export default function SparkTuning({ onProfileChange }) {
       if (data.active_params) {
         setCustomParams(data.active_params);
       }
-      if (data.config?.worker_scaling?.worker_count) {
-        setTargetWorkers(data.config.worker_scaling.worker_count);
+
+      // Retain previously selected scaling values from server config on initial load
+      if (!scalerInitializedRef.current && (data.worker_scaling || data.config?.worker_scaling)) {
+        const sc = data.worker_scaling || data.config.worker_scaling;
+        if (sc.worker_count) {
+          setTargetWorkers(sc.worker_count);
+          localStorage.setItem('spark_scaler_workers', sc.worker_count.toString());
+        }
+        if (sc.worker_ram) {
+          const normRam = sc.worker_ram.toUpperCase();
+          setTargetRam(normRam);
+          localStorage.setItem('spark_scaler_ram', normRam);
+        }
+        if (sc.worker_cores) {
+          setTargetCores(sc.worker_cores);
+          localStorage.setItem('spark_scaler_cores', sc.worker_cores.toString());
+        }
+        scalerInitializedRef.current = true;
       }
     } catch (err) {
       console.error("Failed to load tuning configuration:", err);
@@ -116,6 +143,21 @@ export default function SparkTuning({ onProfileChange }) {
     handleApplyProfile("🛠️ Custom Engine Override", customParams);
   };
 
+  const handleWorkersSliderChange = (newCount) => {
+    setTargetWorkers(newCount);
+    localStorage.setItem('spark_scaler_workers', newCount.toString());
+  };
+
+  const handleRamChange = (newRam) => {
+    setTargetRam(newRam);
+    localStorage.setItem('spark_scaler_ram', newRam);
+  };
+
+  const handleCoresChange = (newCores) => {
+    setTargetCores(newCores);
+    localStorage.setItem('spark_scaler_cores', newCores.toString());
+  };
+
   const handleScaleWorkers = async () => {
     setLoading(true);
     setMsg(null);
@@ -131,6 +173,11 @@ export default function SparkTuning({ onProfileChange }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to scale workers");
+      
+      localStorage.setItem('spark_scaler_workers', targetWorkers.toString());
+      localStorage.setItem('spark_scaler_ram', targetRam);
+      localStorage.setItem('spark_scaler_cores', targetCores.toString());
+
       setMsg({ type: 'success', text: `Worker fleet scaled to ${targetWorkers} nodes with ${targetRam} RAM & ${targetCores} Cores each!` });
       fetchConfig();
     } catch (ex) {
@@ -146,8 +193,6 @@ export default function SparkTuning({ onProfileChange }) {
     const dra = p.dynamic_allocation ? "true" : "false";
     const aqe = p.aqe_enabled ? "true" : "false";
     const aqeCoal = p.aqe_coalesce ? "true" : "false";
-    const offheap = p.offheap_enabled ? "true" : "false";
-    const kryo = p.kryo_serializer ? "true" : "false";
 
     let cmd = `/opt/spark/bin/spark-submit \\\n` +
       `  --driver-memory ${p.driver_memory || "4g"} \\\n` +
@@ -197,6 +242,10 @@ export default function SparkTuning({ onProfileChange }) {
     livy_rest_api: "http://localhost:8998",
     hdfs_namenode: "hdfs://namenode:9000"
   };
+
+  // Memory Options: Max 20 GB with increment of 2 GB
+  const ramOptions = ["2G", "4G", "6G", "8G", "10G", "12G", "14G", "16G", "18G", "20G"];
+  const coresOptions = [1, 2, 4, 6, 8, 12, 16];
 
   return (
     <div className="space-y-6">
@@ -363,7 +412,7 @@ export default function SparkTuning({ onProfileChange }) {
                         <div>Cores/Exec: <span className="text-amber-400 font-bold">{p.executor_cores}</span></div>
                         <div>Max Cores: <span className="text-amber-400 font-bold">{p.max_cores}</span></div>
                         <div>Partitions: <span className="text-indigo-400 font-bold">{p.shuffle_partitions || p.sql_shuffle_partitions}</span></div>
-                        <div>AQE Adaptive: <span className="text-emerald-400 font-bold">{p.aqe_enabled ? 'ENABLED' : 'OFF'}</span></div>
+                        <div>AQE Adaptive: <span className={`font-bold ${p.aqe_enabled ? 'text-emerald-400' : 'text-slate-400'}`}>{p.aqe_enabled ? 'ENABLED' : 'OFF'}</span></div>
                         <div>Off-Heap: <span className="text-purple-400 font-bold">{p.offheap_enabled ? p.offheap_size : 'OFF'}</span></div>
                         <div>Kryo: <span className="text-pink-400 font-bold">{p.kryo_serializer ? 'ON' : 'OFF'}</span></div>
                       </div>
@@ -391,7 +440,7 @@ export default function SparkTuning({ onProfileChange }) {
                         }`}
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        {isCurrent ? 'Active Default' : 'Apply Profile'}
+                        {isCurrent ? 'Active Configuration' : 'Apply Profile'}
                       </button>
                     </div>
                   </div>
@@ -599,10 +648,15 @@ export default function SparkTuning({ onProfileChange }) {
             {/* HORIZONTAL WORKER NODE FLEET SCALER */}
             <div className="glass-card p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
-                  <Server className="w-4 h-4 text-sky-400" />
-                  Worker Fleet Scaler (1 – 8 Nodes)
-                </h3>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                    <Server className="w-4 h-4 text-sky-400" />
+                    Horizontal Worker Fleet Scaler
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Scale from 1 to 8 container nodes with up to 20 GB RAM (increments of 2 GB).
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -610,7 +664,7 @@ export default function SparkTuning({ onProfileChange }) {
                   <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-1.5">
                     <span>Target Worker Containers:</span>
                     <span className="font-mono text-sky-400 font-bold px-2 py-0.5 rounded bg-slate-900 border border-white/10">
-                      {targetWorkers} Workers
+                      {targetWorkers} Nodes
                     </span>
                   </div>
                   <input
@@ -618,24 +672,32 @@ export default function SparkTuning({ onProfileChange }) {
                     min="1"
                     max="8"
                     value={targetWorkers}
-                    onChange={(e) => setTargetWorkers(parseInt(e.target.value, 10))}
+                    onChange={(e) => handleWorkersSliderChange(parseInt(e.target.value, 10))}
                     className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
                   />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+                    <span>1 Node</span>
+                    <span>2</span>
+                    <span>3</span>
+                    <span>4</span>
+                    <span>5</span>
+                    <span>6</span>
+                    <span>7</span>
+                    <span>8 Nodes</span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">RAM / Node</label>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">RAM / Node (Max 20G • +2G)</label>
                     <select
                       value={targetRam}
-                      onChange={(e) => setTargetRam(e.target.value)}
+                      onChange={(e) => handleRamChange(e.target.value)}
                       className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                     >
-                      <option value="2G">2 GB RAM</option>
-                      <option value="4G">4 GB RAM</option>
-                      <option value="8G">8 GB RAM</option>
-                      <option value="12G">12 GB RAM</option>
-                      <option value="16G">16 GB RAM</option>
+                      {ramOptions.map(ram => (
+                        <option key={ram} value={ram}>{ram} RAM ({parseInt(ram)} GB / node)</option>
+                      ))}
                     </select>
                   </div>
 
@@ -643,21 +705,27 @@ export default function SparkTuning({ onProfileChange }) {
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Cores / Node</label>
                     <select
                       value={targetCores}
-                      onChange={(e) => setTargetCores(parseInt(e.target.value, 10))}
+                      onChange={(e) => handleCoresChange(parseInt(e.target.value, 10))}
                       className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                     >
-                      <option value={2}>2 CPU Cores</option>
-                      <option value={4}>4 CPU Cores</option>
-                      <option value={8}>8 CPU Cores</option>
-                      <option value={12}>12 CPU Cores</option>
+                      {coresOptions.map(cores => (
+                        <option key={cores} value={cores}>{cores} CPU Core{cores > 1 ? 's' : ''}</option>
+                      ))}
                     </select>
                   </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-white/5 font-mono text-xs text-slate-300 flex items-center justify-between">
+                  <span className="text-slate-400">Total Cluster Provisioning:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {targetWorkers * parseInt(targetRam)} GB RAM • {targetWorkers * targetCores} Cores
+                  </span>
                 </div>
 
                 <button
                   onClick={handleScaleWorkers}
                   disabled={loading}
-                  className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-sky-600/30"
+                  className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-sky-600/30 disabled:opacity-50"
                 >
                   <Server className="w-4 h-4" />
                   {loading ? 'Scaling Fleet Containers...' : `Apply Scaling (${targetWorkers} Nodes • ${targetWorkers * parseInt(targetRam)}GB Total)`}
