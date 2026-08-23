@@ -293,9 +293,7 @@ services:
     volumes:
       - ./python_scripts:/home/jovyan/work
       - ./scripts:/opt/spark/scripts:ro
-      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
-      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml:ro
-      - ./config/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./config:/opt/spark/conf:ro
     networks:
       - hadoop-network
 

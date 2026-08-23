@@ -428,9 +428,9 @@ def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
                 except Exception as start_ex:
                     res_info["msg"] = f"Direct start error: {start_ex}. Attempting compose..."
 
-        # 2. Fallback: docker compose up -d
+        # 2. Fallback: docker compose up -d --no-deps
         try:
-            compose_cmd = get_compose_base_cmd() + ["up", "-d", comp_name]
+            compose_cmd = get_compose_base_cmd() + ["up", "-d", "--no-deps", comp_name]
             proc = subprocess.run(
                 compose_cmd,
                 capture_output=True,
