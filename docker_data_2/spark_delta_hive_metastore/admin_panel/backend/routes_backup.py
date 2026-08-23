@@ -44,20 +44,43 @@ def list_backups():
     if os.path.exists(backup_dir):
         for entry in sorted(os.listdir(backup_dir), reverse=True):
             entry_path = os.path.join(backup_dir, entry)
-            meta_path = os.path.join(entry_path, "metadata.json")
-            if os.path.isdir(entry_path) and os.path.exists(meta_path):
+            if not os.path.isdir(entry_path) or entry.startswith("."):
+                continue
+            
+            manifest_file = None
+            for candidate in ["backup_manifest.json", "metadata.json", "manifest.json"]:
+                p = os.path.join(entry_path, candidate)
+                if os.path.exists(p):
+                    manifest_file = p
+                    break
+            
+            if manifest_file:
                 try:
-                    with open(meta_path, "r") as f:
+                    with open(manifest_file, "r") as f:
                         meta = json.load(f)
-                    backups.append(meta)
-                except Exception:
                     backups.append({
-                        "backup_id": entry,
-                        "backup_type": "table",
-                        "status": "VALID",
-                        "created_at": "Unknown",
-                        "source_table": entry
+                        "backup_id": meta.get("backup_id", entry),
+                        "database_name": meta.get("database", meta.get("database_name", "default")),
+                        "table_name": meta.get("table", meta.get("table_name", "")),
+                        "timestamp": meta.get("created_at", meta.get("timestamp", "Unknown")),
+                        "size": f"{meta.get('total_size_mb', 0)} MB" if "total_size_mb" in meta else meta.get("size", "Unknown"),
+                        "total_rows": meta.get("total_rows", "N/A"),
+                        "format": meta.get("format", "Parquet"),
+                        "original_location": meta.get("original_location", "")
                     })
+                except Exception:
+                    pass
+            else:
+                backups.append({
+                    "backup_id": entry,
+                    "database_name": "default",
+                    "table_name": entry,
+                    "timestamp": "Unknown",
+                    "size": "Unknown",
+                    "total_rows": "N/A",
+                    "format": "Unknown",
+                    "original_location": ""
+                })
     return {"backups": backups}
 
 @router.post("/execute")
