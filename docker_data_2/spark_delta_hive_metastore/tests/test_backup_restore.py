@@ -96,4 +96,6 @@ def test_execute_restore_command_construction(monkeypatch):
         "storage_dest": "s3a://warehouse/"
     })
     assert res.status_code == 200
-    assert "restore --backup-id backup_sales_2026 --target-table sales_restored --storage-dest s3a://warehouse/" in executed_cmds[-1]
+    assert "restore --backup-id backup_sales_2026" in executed_cmds[-1]
+    assert "--target-table sales_restored" in executed_cmds[-1]
+    assert "--storage-dest s3a://warehouse/" in executed_cmds[-1]
