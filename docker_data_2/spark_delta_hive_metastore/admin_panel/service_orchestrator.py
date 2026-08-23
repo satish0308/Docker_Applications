@@ -183,7 +183,7 @@ SERVICE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "icon": "📓",
         "port": 8888,
         "web_port": 8889,
-        "host": "jupyter",
+        "host": "jupyter-notebook",
         "desc": "Python/PySpark notebook workspace preconfigured with Delta Lake & S3.",
         "est_ram": "1.0 GB",
         "dependencies": ["spark", "spark-worker", "minio", "namenode", "datanode"]
@@ -354,12 +354,12 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                     if h_info == "unhealthy":
                         status_label = "UNHEALTHY"
                 
-                # Verify port socket connectivity if healthy
-                target_port = meta.get("web_port", meta.get("port"))
-                target_host = meta.get("host", meta["compose_service"])
+                # Verify internal port socket connectivity if healthy
+                target_port = meta.get("port")
+                target_host = meta.get("host") or meta.get("container") or meta["compose_service"]
                 if target_port and isinstance(target_port, int):
                     try:
-                        s = socket.create_connection((target_host, target_port), timeout=0.5)
+                        s = socket.create_connection((target_host, target_port), timeout=0.6)
                         s.close()
                         if health_stat == "N/A":
                             health_stat = "HEALTHY"
