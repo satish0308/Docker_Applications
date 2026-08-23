@@ -807,38 +807,36 @@ if menu == "📥 Data Ingestion & Partitioning":
     </div>
     """)
 
-    # Ingestion Status & Job Tracker
-    all_persistent_jobs = load_ingestion_jobs()
-    active_jobs = [j for j in all_persistent_jobs if j.get("status") == "RUNNING"]
-    
-    if active_jobs:
-        curr_j = active_jobs[0]
-        ui_components.render_html(f"""
-        <div class="glass-card" style="border-left: 4px solid #6366f1;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <div class="badge-info">Active Ingestion In Progress</div>
-                    <h3 style="margin: 6px 0; font-size: 1.15rem; color: #ffffff;">Target: <code>{curr_j.get('target_db')}.{curr_j.get('target_table')}</code></h3>
-                    <p style="margin: 0; color: #cbd5e1; font-size: 0.84rem;">{curr_j.get('current_batch_msg', 'Processing micro-batches in Spark cluster...')}</p>
-                </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 1.3rem; font-weight: 800; color: #38bdf8; font-family: monospace;">Chunk {curr_j.get('current_chunk', 1)} / {curr_j.get('total_chunks', 1)}</div>
-                    <div style="font-size: 0.78rem; color: #94a3b8;">Started: {curr_j.get('started_at')}</div>
+    # Ingestion Status & Job Tracker (Auto-Sync)
+    @st.fragment(run_every="3s")
+    def render_live_ingestion_tracker():
+        all_persistent_jobs = load_ingestion_jobs()
+        active_jobs = [j for j in all_persistent_jobs if j.get("status") == "RUNNING"]
+        if active_jobs:
+            curr_j = active_jobs[0]
+            ui_components.render_html(f"""
+            <div class="glass-card" style="border-left: 4px solid #6366f1;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div class="badge-info">Active Ingestion In Progress (Live Auto-Sync)</div>
+                        <h3 style="margin: 6px 0; font-size: 1.15rem; color: #ffffff;">Target: <code>{curr_j.get('target_db')}.{curr_j.get('target_table')}</code></h3>
+                        <p style="margin: 0; color: #cbd5e1; font-size: 0.84rem;">{curr_j.get('current_batch_msg', 'Processing micro-batches in Spark cluster...')}</p>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.3rem; font-weight: 800; color: #38bdf8; font-family: monospace;">Chunk {curr_j.get('current_chunk', 1)} / {curr_j.get('total_chunks', 1)}</div>
+                        <div style="font-size: 0.78rem; color: #94a3b8;">Started: {curr_j.get('started_at')}</div>
+                    </div>
                 </div>
             </div>
-        </div>
-        """)
-        st.progress(curr_j.get('progress_pct', 10))
-        
-        col_act_a, col_act_b = st.columns([1, 4])
-        with col_act_a:
-            if st.button("🔄 Refresh Ingestion Progress", use_container_width=True):
-                st.rerun()
-        with col_act_b:
+            """)
+            st.progress(curr_j.get('progress_pct', 10))
             with st.expander("📜 Live Background Cluster Logs (Tail 40 lines)", expanded=False):
                 st.code(curr_j.get("recent_logs", "Awaiting cluster output..."), language="text")
 
-    elif all_persistent_jobs and all_persistent_jobs[0].get("status") == "SUCCESS":
+    render_live_ingestion_tracker()
+
+    all_persistent_jobs = load_ingestion_jobs()
+    if all_persistent_jobs and all_persistent_jobs[0].get("status") == "SUCCESS":
         last_succ = all_persistent_jobs[0]
         with st.expander(f"🎉 Latest Successful Ingestion: `{last_succ.get('target_db')}.{last_succ.get('target_table')}`", expanded=False):
             col_s1, col_s2, col_s3, col_s4 = st.columns(4)
@@ -1288,31 +1286,30 @@ elif menu == "⚡ Persistent SQL Studio & Tracer":
     </div>
     """, unsafe_allow_html=True)
 
-    all_sql_jobs = load_sql_query_jobs()
-    running_sql_jobs = [j for j in all_sql_jobs if j.get("status") == "RUNNING"]
-
-    if running_sql_jobs:
-        st.markdown('<div class="section-title">🏃‍♂️ Active Queries In Flight</div>', unsafe_allow_html=True)
-        for r_job in running_sql_jobs:
-            q_id = r_job.get("query_id")
-            ui_components.render_html(f"""
-            <div class="glass-card" style="border-left: 4px solid #38bdf8;">
-                <div style="display: flex; justify-content: space-between;">
-                    <div>
-                        <div class="badge-warning">RUNNING IN SPARK CLUSTER</div>
-                        <h4 style="margin: 6px 0 2px 0; color: #ffffff;">Query ID: <code>{q_id}</code></h4>
-                        <div style="font-size: 0.78rem; color: #94a3b8;">Submitted at {r_job.get('submitted_at')}</div>
+    # In-Flight Active Query Watcher (Auto-Sync)
+    @st.fragment(run_every="3s")
+    def render_live_sql_tracker():
+        all_sql_jobs = load_sql_query_jobs()
+        running_sql_jobs = [j for j in all_sql_jobs if j.get("status") == "RUNNING"]
+        if running_sql_jobs:
+            st.markdown('<div class="section-title">🏃‍♂️ Active Queries In Flight <span style="font-size: 0.76rem; color: #38bdf8; font-weight: 600; margin-left: 8px;">🟢 Live Auto-Sync: 3s</span></div>', unsafe_allow_html=True)
+            for r_job in running_sql_jobs:
+                q_id = r_job.get("query_id")
+                ui_components.render_html(f"""
+                <div class="glass-card" style="border-left: 4px solid #38bdf8;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>
+                            <div class="badge-warning">RUNNING IN SPARK CLUSTER</div>
+                            <h4 style="margin: 6px 0 2px 0; color: #ffffff;">Query ID: <code>{q_id}</code></h4>
+                            <div style="font-size: 0.78rem; color: #94a3b8;">Submitted at {r_job.get('submitted_at')}</div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            """)
-            col_c1, col_c2 = st.columns([1, 4])
-            with col_c1:
-                if st.button("🔄 Check Live Status", key=f"ref_{q_id}"):
-                    st.rerun()
-            with col_c2:
+                """)
                 with st.expander("📜 Live DAG Scheduler Logs", expanded=False):
                     st.code(r_job.get("recent_logs", "Processing in Spark DAG Scheduler..."), language="bash")
+
+    render_live_sql_tracker()
 
     st.markdown('<div class="section-title">📝 SQL Query Studio</div>', unsafe_allow_html=True)
     
@@ -2092,56 +2089,61 @@ elif menu == "🎛️ Selective Pod Orchestrator":
     # ---------------------------------------------------------
     # SECTION 3: LIVE SERVICE FLEET MATRIX & INDIVIDUAL CONTROLS
     # ---------------------------------------------------------
-    st.markdown('<div class="section-title">📦 3. Live Cluster Service Fleet Matrix</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📦 3. Live Cluster Service Fleet Matrix <span style="font-size: 0.76rem; color: #34d399; font-weight: 600; margin-left: 8px;">🟢 Live Auto-Sync: 4s</span></div>', unsafe_allow_html=True)
 
     tier_options = ["All Tiers", "Foundation & Metadata", "Compute Engines", "Interactive Studios", "Security & Management"]
     selected_tier = st.radio("Filter by Architecture Tier:", tier_options, horizontal=True)
 
-    filtered_matrix = srv_matrix if selected_tier == "All Tiers" else [m for m in srv_matrix if m["tier"] == selected_tier]
+    @st.fragment(run_every="4s")
+    def render_live_fleet_matrix(tier_filter: str):
+        live_matrix = service_orchestrator.get_service_status_matrix()
+        filtered = live_matrix if tier_filter == "All Tiers" else [m for m in live_matrix if m["tier"] == tier_filter]
 
-    for item in filtered_matrix:
-        status_color = "#34d399" if item["status"] == "RUNNING" else ("#fb7185" if item["status"] == "UNHEALTHY" else "#94a3b8")
-        status_badge = f'<span style="display: inline-block; padding: 2px 10px; background: rgba(255,255,255,0.06); border: 1px solid {status_color}; border-radius: 9999px; color: {status_color}; font-size: 0.75rem; font-weight: 700;">{item["status"]}</span>'
+        for item in filtered:
+            status_color = "#34d399" if item["status"] == "RUNNING" else ("#fb7185" if item["status"] == "UNHEALTHY" else "#94a3b8")
+            status_badge = f'<span style="display: inline-block; padding: 2px 10px; background: rgba(255,255,255,0.06); border: 1px solid {status_color}; border-radius: 9999px; color: {status_color}; font-size: 0.75rem; font-weight: 700;">{item["status"]}</span>'
 
-        with st.container():
-            col_m1, col_m2, col_m3 = st.columns([4, 2, 3])
-            with col_m1:
-                st.markdown(f"""
-                <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
-                    <div style="font-size: 1.6rem;">{item['icon']}</div>
-                    <div>
-                        <div style="font-weight: 800; font-size: 0.98rem; color: #ffffff;">{item['name']}</div>
-                        <div style="font-size: 0.78rem; color: #cbd5e1;"><code>{item['compose_service']}</code> • {item['desc']}</div>
+            with st.container():
+                col_m1, col_m2, col_m3 = st.columns([4, 2, 3])
+                with col_m1:
+                    st.markdown(f"""
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+                        <div style="font-size: 1.6rem;">{item['icon']}</div>
+                        <div>
+                            <div style="font-weight: 800; font-size: 0.98rem; color: #ffffff;">{item['name']}</div>
+                            <div style="font-size: 0.78rem; color: #cbd5e1;"><code>{item['compose_service']}</code> • {item['desc']}</div>
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-            with col_m2:
-                st.markdown(f"""
-                <div style="padding: 10px 0; font-size: 0.80rem; color: #cbd5e1;">
-                    <div>Status: {status_badge}</div>
-                    <div style="margin-top: 3px; color: #94a3b8;">Port: <b>{item['port']}</b> | RAM: <b>{item['est_ram']}</b></div>
-                </div>
-                """, unsafe_allow_html=True)
+                with col_m2:
+                    st.markdown(f"""
+                    <div style="padding: 10px 0; font-size: 0.80rem; color: #cbd5e1;">
+                        <div>Status: {status_badge}</div>
+                        <div style="margin-top: 3px; color: #94a3b8;">Port: <b>{item['port']}</b> | RAM: <b>{item['est_ram']}</b></div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-            with col_m3:
-                c_btn1, c_btn2, c_btn3 = st.columns(3)
-                with c_btn1:
-                    if st.button("▶️ Start", key=f"start_{item['key']}", disabled=item["is_running"], use_container_width=True):
-                        with st.spinner(f"Starting {item['name']} and dependencies..."):
-                            service_orchestrator.start_services_sequential([item['key']])
-                            st.rerun()
-                with c_btn2:
-                    if st.button("⏹️ Stop", key=f"stop_{item['key']}", disabled=not item["is_running"], use_container_width=True):
-                        with st.spinner(f"Stopping {item['name']}..."):
-                            service_orchestrator.stop_services_cascade([item['key']], cascade=False)
-                            st.rerun()
-                with c_btn3:
-                    if st.button("🔄 Restart", key=f"rst_{item['key']}", disabled=not item["is_running"], use_container_width=True):
-                        with st.spinner(f"Restarting {item['name']}..."):
-                            service_orchestrator.restart_single_service(item['key'])
-                            st.rerun()
-            st.markdown("<hr style='margin: 4px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.06);'>", unsafe_allow_html=True)
+                with col_m3:
+                    c_btn1, c_btn2, c_btn3 = st.columns(3)
+                    with c_btn1:
+                        if st.button("▶️ Start", key=f"start_{item['key']}", disabled=item["is_running"], use_container_width=True):
+                            with st.spinner(f"Starting {item['name']} and dependencies..."):
+                                service_orchestrator.start_services_sequential([item['key']])
+                                st.rerun()
+                    with c_btn2:
+                        if st.button("⏹️ Stop", key=f"stop_{item['key']}", disabled=not item["is_running"], use_container_width=True):
+                            with st.spinner(f"Stopping {item['name']}..."):
+                                service_orchestrator.stop_services_cascade([item['key']], cascade=False)
+                                st.rerun()
+                    with c_btn3:
+                        if st.button("🔄 Restart", key=f"rst_{item['key']}", disabled=not item["is_running"], use_container_width=True):
+                            with st.spinner(f"Restarting {item['name']}..."):
+                                service_orchestrator.restart_single_service(item['key'])
+                                st.rerun()
+                st.markdown("<hr style='margin: 4px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.06);'>", unsafe_allow_html=True)
+
+    render_live_fleet_matrix(selected_tier)
 
 
 # =============================================================
