@@ -1,15 +1,24 @@
 import React from 'react';
 import { Activity, ExternalLink, Zap, Server, Shield, Database, Terminal, Globe } from 'lucide-react';
 
-export default function Header({ clusterOnline, unhealthyCount, wsConnected, activeProfile }) {
+export default function Header({ clusterOnline, unhealthyCount, wsConnected, activeProfile, services = [] }) {
   const portals = [
-    { name: 'Hue', port: 8888, icon: '🎨', color: 'hover:text-indigo-400 hover:border-indigo-500/40' },
-    { name: 'Spark', port: 8089, icon: '⚡', color: 'hover:text-sky-400 hover:border-sky-500/40' },
-    { name: 'History', port: 18080, icon: '📜', color: 'hover:text-amber-400 hover:border-amber-500/40' },
-    { name: 'Jupyter', port: 8889, icon: '📓', color: 'hover:text-emerald-400 hover:border-emerald-500/40' },
-    { name: 'MinIO', port: 9001, icon: '🪣', color: 'hover:text-rose-400 hover:border-rose-500/40' },
-    { name: 'pgAdmin', port: 8081, icon: '🛠️', color: 'hover:text-purple-400 hover:border-purple-500/40' },
+    { name: 'Hue', port: 8888, icon: '🎨', serviceKey: 'hue', color: 'hover:text-indigo-400 hover:border-indigo-500/40' },
+    { name: 'Spark', port: 8089, icon: '⚡', serviceKey: 'spark', color: 'hover:text-sky-400 hover:border-sky-500/40' },
+    { name: 'History', port: 18080, icon: '📜', serviceKey: 'spark', color: 'hover:text-amber-400 hover:border-amber-500/40' },
+    { name: 'Jupyter', port: 8889, icon: '📓', serviceKey: 'jupyter', color: 'hover:text-emerald-400 hover:border-emerald-500/40' },
+    { name: 'MinIO', port: 9001, icon: '🪣', serviceKey: 'minio', color: 'hover:text-rose-400 hover:border-rose-500/40' },
+    { name: 'pgAdmin', port: 8081, icon: '🛠️', serviceKey: 'pgadmin', color: 'hover:text-purple-400 hover:border-purple-500/40' },
   ];
+
+  const isServiceRunning = (key) => {
+    const svc = services.find(s => 
+      s.compose_service === key || 
+      (s.name && s.name.toLowerCase().includes(key.toLowerCase())) ||
+      (s.container_name && s.container_name.toLowerCase().includes(key.toLowerCase()))
+    );
+    return svc ? svc.status === 'RUNNING' : false;
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-[#07090e]/85 backdrop-blur-xl border-b border-white/[0.08] px-6 py-3">
@@ -70,22 +79,35 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
             <span className="whitespace-nowrap">{clusterOnline ? 'Cluster Online' : `Server Unhealthy (${unhealthyCount})`}</span>
           </div>
 
-          {/* Uniform Direct Web Portal Navigation Links */}
+          {/* Uniform Direct Web Portal Navigation Links with Live Indicator Bulbs */}
           <div className="flex items-center gap-1.5 pl-2.5 border-l border-white/10">
-            {portals.map(p => (
-              <a
-                key={p.name}
-                href={`http://localhost:${p.port}`}
-                target="_blank"
-                rel="noreferrer"
-                className={`h-8 px-2.5 rounded-lg bg-slate-900/70 hover:bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-300 transition-all flex items-center gap-1.5 group ${p.color}`}
-                title={`Open ${p.name} (Port ${p.port})`}
-              >
-                <span className="text-xs">{p.icon}</span>
-                <span>{p.name}</span>
-                <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-100 transition flex-shrink-0" />
-              </a>
-            ))}
+            {portals.map(p => {
+              const running = isServiceRunning(p.serviceKey);
+              return (
+                <a
+                  key={p.name}
+                  href={`http://localhost:${p.port}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`h-8 px-2.5 rounded-lg bg-slate-900/70 hover:bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-300 transition-all flex items-center gap-1.5 group ${p.color}`}
+                  title={`Open ${p.name} (Port ${p.port}) • Status: ${running ? 'Running' : 'Stopped'}`}
+                >
+                  {/* Small Status Bulb */}
+                  <span className="relative flex h-2 w-2 flex-shrink-0">
+                    {running && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    )}
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      running ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-rose-500 shadow-sm shadow-rose-500/80'
+                    }`}></span>
+                  </span>
+
+                  <span className="text-xs">{p.icon}</span>
+                  <span>{p.name}</span>
+                  <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-100 transition flex-shrink-0" />
+                </a>
+              );
+            })}
           </div>
 
         </div>

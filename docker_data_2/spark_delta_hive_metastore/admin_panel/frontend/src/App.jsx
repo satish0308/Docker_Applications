@@ -91,6 +91,7 @@ export default function App() {
         unhealthyCount={unhealthyCount}
         wsConnected={wsConnected}
         activeProfile={activeProfile}
+        services={services}
       />
 
       {/* Main App Workspace */}

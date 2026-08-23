@@ -12,7 +12,8 @@ import {
   Loader2, 
   Database,
   Calendar,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 
 export default function DeltaMaintenance() {
@@ -179,19 +180,37 @@ export default function DeltaMaintenance() {
             <Database className="w-5 h-5 text-indigo-400" />
             <div>
               <div className="text-xs font-bold text-slate-400">Target Delta Lake Table</div>
-              {tables.length > 0 ? (
-                <select
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="text"
+                  list="metastore-table-list"
                   value={selectedTable}
                   onChange={(e) => setSelectedTable(e.target.value)}
-                  className="bg-slate-900 border border-white/15 rounded-lg px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500 mt-1"
-                >
+                  placeholder="e.g. default.sales"
+                  className="bg-slate-900 border border-white/15 rounded-lg px-3 py-1.5 text-xs font-mono font-semibold text-white focus:outline-none focus:border-indigo-500 w-56"
+                />
+                <datalist id="metastore-table-list">
                   {tables.map(t => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} />
                   ))}
-                </select>
-              ) : (
-                <span className="text-xs font-mono text-slate-500">default.sales (default)</span>
-              )}
+                </datalist>
+                <button
+                  onClick={() => {
+                    fetch('/api/metastore/tables')
+                      .then(res => res.json())
+                      .then(data => {
+                        const tblList = (data.tables || []).map(t => `${t.Database}.${t['Table Name']}`);
+                        setTables(tblList);
+                        if (tblList.length > 0 && !selectedTable) setSelectedTable(tblList[0]);
+                      })
+                      .catch(console.error);
+                  }}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                  title="Refresh Table List from Metastore"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
