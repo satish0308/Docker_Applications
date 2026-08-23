@@ -18,6 +18,7 @@ from backend.routes_ingestion import router as ingestion_router
 from backend.routes_tuning import router as tuning_router
 from backend.routes_metastore import router as metastore_router
 from backend.routes_diagnostics import router as diagnostics_router
+from backend.routes_delta import router as delta_router
 
 app = FastAPI(
     title="BDP Platform Studio • Enterprise SaaS Control Engine",
@@ -41,6 +42,7 @@ app.include_router(ingestion_router)
 app.include_router(tuning_router)
 app.include_router(metastore_router)
 app.include_router(diagnostics_router)
+app.include_router(delta_router)
 
 @app.on_event("startup")
 async def startup_event():

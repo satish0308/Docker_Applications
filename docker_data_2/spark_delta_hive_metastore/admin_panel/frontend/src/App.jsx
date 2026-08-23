@@ -8,6 +8,7 @@ import MetastoreCatalog from './components/MetastoreCatalog';
 import TerminalLogs from './components/TerminalLogs';
 import Diagnostics from './components/Diagnostics';
 import ClusterHealth from './components/ClusterHealth';
+import DeltaMaintenance from './components/DeltaMaintenance';
 
 export default function App() {
   const [activeTab, setActiveTabState] = useState(() => {
@@ -123,7 +124,11 @@ export default function App() {
             <ClusterHealth services={services} onRefresh={fetchMatrix} />
           )}
 
-          {['ingestion', 'backup', 'delta_time', 'purge', 'docs'].includes(activeTab) && (
+          {activeTab === 'delta_time' && (
+            <DeltaMaintenance />
+          )}
+
+          {['ingestion', 'backup', 'purge', 'docs'].includes(activeTab) && (
             <div className="glass-card p-12 text-center space-y-3">
               <div className="text-3xl">🚀</div>
               <h3 className="text-lg font-bold text-white capitalize">{activeTab.replace('_', ' ')} Studio</h3>
