@@ -1,7 +1,7 @@
 """
 Table & Database Disaster Recovery and Backup API Router
 Provides endpoints for table backup execution, database dump, backup inventory listing, 1-click restore,
-automated disaster recovery scheduling, and automated retention / pruning.
+persistent decoupled background execution jobs, automated disaster recovery scheduling, and automated retention / pruning.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/backup", tags=["Backup & Disaster Recovery"])
 
 BACKUP_PATHS = ["/workspace/backups", "/backups", "./backups"]
 BACKUP_SCHEDULES_FILE = "backup_schedules.json"
+BACKUP_JOBS_FILE = "backup_execution_jobs.json"
 
 FREQUENCY_INTERVAL_MAP = {
     "1h": 3600,
@@ -93,6 +94,19 @@ def get_dir_mtime_str(path: str) -> str:
     except Exception:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def load_backup_jobs() -> List[Dict[str, Any]]:
+    if os.path.exists(BACKUP_JOBS_FILE):
+        try:
+            with open(BACKUP_JOBS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_backup_jobs(jobs: List[Dict[str, Any]]):
+    with open(BACKUP_JOBS_FILE, "w") as f:
+        json.dump(jobs, f, indent=2)
+
 def load_backup_schedules() -> List[Dict[str, Any]]:
     if os.path.exists(BACKUP_SCHEDULES_FILE):
         try:
@@ -150,6 +164,128 @@ def prune_old_backups(database: str, table: Optional[str], mode: str, retention_
                 print(f"Error pruning backup {entry_name}: {ex}")
     
     return pruned
+
+# -------------------------------------------------------------
+# ASYNCHRONOUS DECOUPLED EXECUTION RUNNERS
+# -------------------------------------------------------------
+
+def run_backup_background(job_id: str, mode: str, database: str, table: Optional[str], custom_backup_id: Optional[str], retention_count: Optional[int]):
+    """Decoupled background worker executing backup inside Spark container."""
+    t0 = time.time()
+    try:
+        client = docker.from_env()
+        spark_cont = client.containers.get("spark")
+
+        if mode == "database":
+            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup-db --database {database}"
+        else:
+            table_name = table or "sales"
+            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup --table {database}.{table_name}"
+        
+        if custom_backup_id and custom_backup_id.strip():
+            cmd += f" --backup-id {custom_backup_id.strip()}"
+
+        res = spark_cont.exec_run(cmd)
+        output = res.output.decode("utf-8", errors="ignore")
+        elapsed = round(time.time() - t0, 2)
+
+        pruned = []
+        if res.exit_code == 0 and retention_count and retention_count > 0:
+            pruned = prune_old_backups(database, table, mode, retention_count)
+
+        jobs = load_backup_jobs()
+        for j in jobs:
+            if j.get("job_id") == job_id:
+                j["status"] = "SUCCESS" if res.exit_code == 0 else "FAILED"
+                j["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                j["elapsed_seconds"] = elapsed
+                j["exit_code"] = res.exit_code
+                j["output"] = output
+                j["recent_logs"] = output[-4000:] if output else ""
+                j["pruned_archives"] = pruned
+                break
+        save_backup_jobs(jobs)
+
+    except Exception as ex:
+        elapsed = round(time.time() - t0, 2)
+        jobs = load_backup_jobs()
+        for j in jobs:
+            if j.get("job_id") == job_id:
+                j["status"] = "FAILED"
+                j["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                j["elapsed_seconds"] = elapsed
+                j["error"] = str(ex)
+                j["recent_logs"] = f"Execution Error: {ex}"
+                break
+        save_backup_jobs(jobs)
+
+def run_restore_background(job_id: str, backup_id: str, mode: str, target_database: str, target_table: Optional[str], storage_dest: str):
+    """Decoupled background worker executing restore inside Spark container."""
+    t0 = time.time()
+    try:
+        client = docker.from_env()
+        spark_cont = client.containers.get("spark")
+
+        if mode == "database":
+            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore-db --backup-id {backup_id} --database {target_database} --storage-dest {storage_dest}"
+        else:
+            target_tbl_arg = f"--target-table {target_table}" if target_table else ""
+            cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore --backup-id {backup_id} --database {target_database} {target_tbl_arg} --storage-dest {storage_dest}"
+        
+        res = spark_cont.exec_run(cmd)
+        output = res.output.decode("utf-8", errors="ignore")
+        elapsed = round(time.time() - t0, 2)
+
+        jobs = load_backup_jobs()
+        for j in jobs:
+            if j.get("job_id") == job_id:
+                j["status"] = "SUCCESS" if res.exit_code == 0 else "FAILED"
+                j["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                j["elapsed_seconds"] = elapsed
+                j["exit_code"] = res.exit_code
+                j["output"] = output
+                j["recent_logs"] = output[-4000:] if output else ""
+                break
+        save_backup_jobs(jobs)
+
+    except Exception as ex:
+        elapsed = round(time.time() - t0, 2)
+        jobs = load_backup_jobs()
+        for j in jobs:
+            if j.get("job_id") == job_id:
+                j["status"] = "FAILED"
+                j["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                j["elapsed_seconds"] = elapsed
+                j["error"] = str(ex)
+                j["recent_logs"] = f"Execution Error: {ex}"
+                break
+        save_backup_jobs(jobs)
+
+# -------------------------------------------------------------
+# API ROUTER ENDPOINTS
+# -------------------------------------------------------------
+
+@router.get("/jobs")
+def get_backup_jobs():
+    """Returns persistent list of all backup and restore execution jobs."""
+    return {"jobs": load_backup_jobs()}
+
+@router.delete("/jobs/clear-all")
+def clear_all_backup_jobs():
+    """Clears all historical backup/restore execution jobs."""
+    save_backup_jobs([])
+    return {"status": "SUCCESS", "message": "Backup job history cleared."}
+
+@router.delete("/jobs/{job_id}")
+def delete_backup_job(job_id: str):
+    """Deletes a specific backup/restore job record from history."""
+    if job_id == "clear-all":
+        save_backup_jobs([])
+        return {"status": "SUCCESS", "message": "Backup job history cleared."}
+    jobs = load_backup_jobs()
+    updated = [j for j in jobs if j.get("job_id") != job_id]
+    save_backup_jobs(updated)
+    return {"status": "DELETED", "job_id": job_id}
 
 @router.get("/list")
 def list_backups():
@@ -228,65 +364,84 @@ def list_backups():
 
 @router.post("/execute")
 def execute_backup(req: BackupRequest):
-    """Triggers table or complete database backup inside the Spark container with optional retention pruning."""
-    try:
-        client = docker.from_env()
-        spark_cont = client.containers.get("spark")
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Failed to connect to Spark container: {ex}")
+    """Triggers table or complete database backup asynchronously in background with persistent job tracking."""
+    job_id = f"job_bkp_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+    target_label = f"Database: {req.database}" if req.mode == "database" else f"Table: {req.database}.{req.table or 'sales'}"
 
-    if req.mode == "database":
-        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup-db --database {req.database}"
-    else:
-        table_name = req.table or "sales"
-        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py backup --table {req.database}.{table_name}"
-    
-    if req.custom_backup_id and req.custom_backup_id.strip():
-        cmd += f" --backup-id {req.custom_backup_id.strip()}"
+    new_job = {
+        "job_id": job_id,
+        "action_type": "BACKUP",
+        "mode": req.mode,
+        "database": req.database,
+        "table": req.table if req.mode == "table" else None,
+        "target_label": target_label,
+        "custom_backup_id": req.custom_backup_id,
+        "retention_count": req.retention_count,
+        "status": "RUNNING",
+        "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "completed_at": None,
+        "elapsed_seconds": None,
+        "recent_logs": f"Initializing Spark backup job for {target_label}...",
+        "output": "",
+        "error": None
+    }
 
-    res = spark_cont.exec_run(cmd)
-    output = res.output.decode("utf-8", errors="ignore")
-    
-    if res.exit_code != 0:
-        raise HTTPException(status_code=500, detail=output)
-    
-    pruned_archives = []
-    if req.retention_count and req.retention_count > 0:
-        pruned_archives = prune_old_backups(req.database, req.table, req.mode, req.retention_count)
+    jobs = load_backup_jobs()
+    jobs.insert(0, new_job)
+    save_backup_jobs(jobs)
+
+    t = threading.Thread(
+        target=run_backup_background,
+        args=(job_id, req.mode, req.database, req.table, req.custom_backup_id, req.retention_count),
+        daemon=True
+    )
+    t.start()
 
     return {
-        "status": "SUCCESS",
-        "command": cmd,
-        "output": output,
-        "pruned_archives": pruned_archives
+        "status": "SUBMITTED",
+        "job_id": job_id,
+        "job": new_job
     }
 
 @router.post("/restore")
 def execute_restore(req: RestoreRequest):
-    """Restores a table or database backup in-place or to a cloned target."""
-    try:
-        client = docker.from_env()
-        spark_cont = client.containers.get("spark")
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Failed to connect to Spark container: {ex}")
+    """Restores a table or database backup asynchronously in background with persistent job tracking."""
+    job_id = f"job_rst_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+    target_label = f"Database: {req.target_database}" if req.mode == "database" else f"Table: {req.target_database}.{req.target_table or 'original'}"
 
-    if req.mode == "database":
-        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore-db --backup-id {req.backup_id} --database {req.target_database} --storage-dest {req.storage_dest}"
-    else:
-        target_tbl_arg = f"--target-table {req.target_table}" if req.target_table else ""
-        cmd = f"/opt/spark/bin/spark-submit --driver-memory 2g /opt/spark/python_scripts/backup_restore_table.py restore --backup-id {req.backup_id} --database {req.target_database} {target_tbl_arg} --storage-dest {req.storage_dest}"
-    
-    res = spark_cont.exec_run(cmd)
-    output = res.output.decode("utf-8", errors="ignore")
-    
-    if res.exit_code != 0:
-        raise HTTPException(status_code=500, detail=output)
-    
-    return {
-        "status": "SUCCESS",
+    new_job = {
+        "job_id": job_id,
+        "action_type": "RESTORE",
         "backup_id": req.backup_id,
-        "command": cmd,
-        "output": output
+        "mode": req.mode,
+        "target_database": req.target_database,
+        "target_table": req.target_table,
+        "storage_dest": req.storage_dest,
+        "target_label": target_label,
+        "status": "RUNNING",
+        "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "completed_at": None,
+        "elapsed_seconds": None,
+        "recent_logs": f"Initializing Spark table/db restore from snapshot {req.backup_id}...",
+        "output": "",
+        "error": None
+    }
+
+    jobs = load_backup_jobs()
+    jobs.insert(0, new_job)
+    save_backup_jobs(jobs)
+
+    t = threading.Thread(
+        target=run_restore_background,
+        args=(job_id, req.backup_id, req.mode, req.target_database, req.target_table, req.storage_dest),
+        daemon=True
+    )
+    t.start()
+
+    return {
+        "status": "SUBMITTED",
+        "job_id": job_id,
+        "job": new_job
     }
 
 @router.delete("/{backup_id}")
@@ -377,26 +532,19 @@ def run_backup_schedule_now(schedule_id: str):
     schedules = load_backup_schedules()
     for s in schedules:
         if s.get("schedule_id") == schedule_id:
-            # Execute backup
             bkp_req = BackupRequest(
                 mode=s.get("mode", "table"),
                 database=s.get("database", "default"),
                 table=s.get("table"),
                 retention_count=s.get("retention_count", 3)
             )
-            try:
-                res = execute_backup(bkp_req)
-                s["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                s["last_status"] = "SUCCESS"
-                interval_sec = s.get("interval_seconds", 3600)
-                s["next_run"] = (datetime.now() + timedelta(seconds=interval_sec)).strftime("%Y-%m-%d %H:%M:%S")
-                save_backup_schedules(schedules)
-                return {"status": "SUCCESS", "message": f"Backup policy '{s.get('name')}' executed successfully.", "details": res}
-            except Exception as ex:
-                s["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                s["last_status"] = "FAILED"
-                save_backup_schedules(schedules)
-                raise HTTPException(status_code=500, detail=str(ex))
+            res = execute_backup(bkp_req)
+            s["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            s["last_status"] = "TRIGGERED"
+            interval_sec = s.get("interval_seconds", 3600)
+            s["next_run"] = (datetime.now() + timedelta(seconds=interval_sec)).strftime("%Y-%m-%d %H:%M:%S")
+            save_backup_schedules(schedules)
+            return {"status": "SUCCESS", "message": f"Backup policy '{s.get('name')}' triggered successfully.", "job": res.get("job")}
 
     raise HTTPException(status_code=404, detail="Schedule not found")
 

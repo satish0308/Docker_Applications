@@ -22,14 +22,20 @@ import {
   ToggleRight,
   Sparkles,
   Layers,
-  History
+  History,
+  Eraser,
+  ChevronDown,
+  ChevronUp,
+  Activity
 } from 'lucide-react';
 
 export default function BackupRestore() {
-  const [activeSubTab, setActiveSubTab] = useState('manual'); // 'manual' | 'automated'
+  const [activeSubTab, setActiveSubTab] = useState('manual'); // 'manual' | 'automated' | 'history'
   const [backups, setBackups] = useState([]);
   const [schedules, setSchedules] = useState([]);
+  const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [expandedJobId, setExpandedJobId] = useState(null);
 
   // Metastore Catalog for Cascading Dropdowns
   const [catalogTables, setCatalogTables] = useState([]);
@@ -41,16 +47,14 @@ export default function BackupRestore() {
   const [table, setTable] = useState('sales');
   const [customId, setCustomId] = useState('');
   const [retentionLimit, setRetentionLimit] = useState(3);
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [backupOutput, setBackupOutput] = useState(null);
+  const [submittingBackup, setSubmittingBackup] = useState(false);
 
   // Restore Form State
   const [selectedBackupId, setSelectedBackupId] = useState('');
   const [targetDb, setTargetDb] = useState('default');
   const [targetTable, setTargetTable] = useState('');
   const [storageDest, setStorageDest] = useState('s3a://warehouse/');
-  const [restoreRunning, setRestoreRunning] = useState(false);
-  const [restoreOutput, setRestoreOutput] = useState(null);
+  const [submittingRestore, setSubmittingRestore] = useState(false);
 
   // Auto-Backup Policy Creator Form State
   const [policyName, setPolicyName] = useState('');
@@ -97,6 +101,20 @@ export default function BackupRestore() {
     }
   };
 
+  const fetchJobs = async () => {
+    try {
+      const res = await fetch('/api/backup/jobs');
+      const data = await res.json();
+      const jobList = data.jobs || [];
+      setJobs(jobList);
+      if (jobList.length > 0 && !expandedJobId) {
+        setExpandedJobId(jobList[0].job_id);
+      }
+    } catch (err) {
+      console.error("Failed to fetch backup jobs:", err);
+    }
+  };
+
   const fetchSchedules = async () => {
     try {
       const res = await fetch('/api/backup/schedules');
@@ -110,6 +128,12 @@ export default function BackupRestore() {
   useEffect(() => {
     fetchBackups();
     fetchSchedules();
+    fetchJobs();
+    const interval = setInterval(() => {
+      fetchJobs();
+      fetchBackups();
+    }, 2500);
+    return () => clearInterval(interval);
   }, []);
 
   // Tables filtered by chosen database (Manual Form)
@@ -135,8 +159,7 @@ export default function BackupRestore() {
   }, [policyDb, catalogTables]);
 
   const handleRunBackup = async () => {
-    setBackupRunning(true);
-    setBackupOutput(null);
+    setSubmittingBackup(true);
     try {
       const res = await fetch('/api/backup/execute', {
         method: 'POST',
@@ -150,20 +173,21 @@ export default function BackupRestore() {
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Backup failed");
-      setBackupOutput(data);
-      fetchBackups();
+      if (!res.ok) throw new Error(data.detail || "Backup failed to submit");
+      if (data.job_id) {
+        setExpandedJobId(data.job_id);
+      }
+      fetchJobs();
     } catch (err) {
-      setBackupOutput({ error: err.message });
+      alert(`Backup error: ${err.message}`);
     } finally {
-      setBackupRunning(false);
+      setSubmittingBackup(false);
     }
   };
 
   const handleRunRestore = async () => {
     if (!selectedBackupId) return;
-    setRestoreRunning(true);
-    setRestoreOutput(null);
+    setSubmittingRestore(true);
 
     const chosenBackup = backups.find(b => b.backup_id === selectedBackupId);
     const isDb = chosenBackup?.backup_type === 'database';
@@ -181,12 +205,15 @@ export default function BackupRestore() {
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Restore failed");
-      setRestoreOutput(data);
+      if (!res.ok) throw new Error(data.detail || "Restore failed to submit");
+      if (data.job_id) {
+        setExpandedJobId(data.job_id);
+      }
+      fetchJobs();
     } catch (err) {
-      setRestoreOutput({ error: err.message });
+      alert(`Restore error: ${err.message}`);
     } finally {
-      setRestoreRunning(false);
+      setSubmittingRestore(false);
     }
   };
 
@@ -197,6 +224,27 @@ export default function BackupRestore() {
       if (res.ok) {
         fetchBackups();
       }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteJob = async (jobId, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await fetch(`/api/backup/jobs/${jobId}`, { method: 'DELETE' });
+      fetchJobs();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleClearAllJobs = async () => {
+    if (!window.confirm("Are you sure you want to clear all backup execution audit records?")) return;
+    try {
+      await fetch('/api/backup/jobs/clear-all', { method: 'DELETE' });
+      setExpandedJobId(null);
+      fetchJobs();
     } catch (err) {
       console.error(err);
     }
@@ -256,11 +304,14 @@ export default function BackupRestore() {
     try {
       await fetch(`/api/backup/schedules/${scheduleId}/run-now`, { method: 'POST' });
       fetchSchedules();
-      fetchBackups();
+      fetchJobs();
     } catch (err) {
       console.error(err);
     }
   };
+
+  const runningJobs = jobs.filter(j => j.status === 'RUNNING');
+  const completedJobs = jobs.filter(j => j.status !== 'RUNNING');
 
   return (
     <div className="space-y-6">
@@ -277,7 +328,7 @@ export default function BackupRestore() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="bg-slate-900 border border-white/10 p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setActiveSubTab('manual')}
@@ -299,12 +350,23 @@ export default function BackupRestore() {
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              Automated Auto-Backup & Pruning ({schedules.length})
+              Auto-Backup Policies ({schedules.length})
+            </button>
+            <button
+              onClick={() => setActiveSubTab('history')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                activeSubTab === 'history' 
+                  ? 'bg-purple-600 text-white shadow-lg' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              Execution Audit ({jobs.length})
             </button>
           </div>
 
           <button
-            onClick={() => { fetchBackups(); fetchSchedules(); }}
+            onClick={() => { fetchBackups(); fetchSchedules(); fetchJobs(); }}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
             title="Refresh Backups & Policies"
           >
@@ -312,6 +374,56 @@ export default function BackupRestore() {
           </button>
         </div>
       </div>
+
+      {/* ========================================================= */}
+      {/* PERSISTENT IN-FLIGHT RUNNING BACKUP / RESTORE BANNER      */}
+      {/* ========================================================= */}
+      {runningJobs.length > 0 && (
+        <div className="glass-card p-5 space-y-4 border border-purple-500/50 bg-gradient-to-r from-purple-950/40 via-slate-900 to-slate-900 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-2.5">
+              <span className="flex h-3 w-3 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-purple-500"></span>
+              </span>
+              Active In-Flight Disaster Recovery Execution ({runningJobs.length})
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
+              SURVIVES HARD REFRESH (Ctrl+F5)
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {runningJobs.map(j => (
+              <div key={j.job_id} className="p-4 rounded-xl bg-slate-950/80 border border-purple-500/30 space-y-2">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="font-mono text-xs font-bold text-white flex items-center gap-2">
+                      <span className="text-purple-400 font-black">[{j.action_type}]</span>
+                      <span>{j.target_label || j.job_id}</span>
+                      <span className="px-2 py-0.5 rounded bg-purple-500/20 text-[10px] text-purple-300 border border-purple-500/30 font-bold">
+                        RUNNING
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      Job ID: {j.job_id} • Started at: {j.submitted_at}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+                    <span className="text-xs text-purple-300 font-mono font-bold">Executing on Spark Master...</span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-white/5 font-mono text-[11px] text-slate-300">
+                  {j.recent_logs || "Streaming distributed logs from Spark container..."}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ========================================================= */}
       {/* SUB-TAB 1: MANUAL BACKUP & RESTORE                        */}
@@ -421,13 +533,13 @@ export default function BackupRestore() {
 
             <button
               onClick={handleRunBackup}
-              disabled={backupRunning}
+              disabled={submittingBackup || runningJobs.length > 0}
               className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30 disabled:opacity-50"
             >
-              {backupRunning ? (
+              {submittingBackup ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating Checksum Protected Backup...
+                  Spawning Spark Job...
                 </>
               ) : (
                 <>
@@ -436,16 +548,6 @@ export default function BackupRestore() {
                 </>
               )}
             </button>
-
-            {backupOutput && (
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-white/10 text-xs font-mono max-h-40 overflow-y-auto custom-scrollbar">
-                {backupOutput.error ? (
-                  <span className="text-rose-400">{backupOutput.error}</span>
-                ) : (
-                  <pre className="text-emerald-400 whitespace-pre-wrap">{backupOutput.output}</pre>
-                )}
-              </div>
-            )}
           </div>
 
           {/* RIGHT: RESTORE PANEL */}
@@ -520,13 +622,13 @@ export default function BackupRestore() {
 
             <button
               onClick={handleRunRestore}
-              disabled={restoreRunning || !selectedBackupId}
+              disabled={submittingRestore || !selectedBackupId || runningJobs.length > 0}
               className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-sky-600/30 disabled:opacity-50"
             >
-              {restoreRunning ? (
+              {submittingRestore ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Verifying Checksums & Restoring Table...
+                  Spawning Spark Restore Job...
                 </>
               ) : (
                 <>
@@ -535,16 +637,6 @@ export default function BackupRestore() {
                 </>
               )}
             </button>
-
-            {restoreOutput && (
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-white/10 text-xs font-mono max-h-40 overflow-y-auto custom-scrollbar">
-                {restoreOutput.error ? (
-                  <span className="text-rose-400">{restoreOutput.error}</span>
-                ) : (
-                  <pre className="text-sky-400 whitespace-pre-wrap">{restoreOutput.output}</pre>
-                )}
-              </div>
-            )}
           </div>
 
           {/* FULL WIDTH: AVAILABLE SNAPSHOT ARCHIVES */}
@@ -619,7 +711,7 @@ export default function BackupRestore() {
       )}
 
       {/* ========================================================= */}
-      {/* SUB-TAB 2: AUTOMATED DISASTER RECOVERY & RETENTION ENGINE */}
+      {/* SUB-TAB 2: AUTOMATED DISASTER RECOVERY POLICIES           */}
       {/* ========================================================= */}
       {activeSubTab === 'automated' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -826,6 +918,110 @@ export default function BackupRestore() {
             )}
           </div>
 
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* SUB-TAB 3: BACKUP / RESTORE EXECUTION AUDIT & HISTORY     */}
+      {/* ========================================================= */}
+      {activeSubTab === 'history' && (
+        <div className="glass-card p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-white/5 pb-3">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-purple-400" />
+                Backup & Restore Execution History ({completedJobs.length})
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Audit trail of all previous backup and restore operations with timing and logs.
+              </p>
+            </div>
+
+            <button
+              onClick={handleClearAllJobs}
+              disabled={completedJobs.length === 0}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-white/10 flex items-center gap-1.5 transition disabled:opacity-40"
+            >
+              <Eraser className="w-3.5 h-3.5 text-rose-400" />
+              Clear Audit History
+            </button>
+          </div>
+
+          {completedJobs.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/40 rounded-xl border border-white/5">
+              No historical execution logs recorded yet. Run a backup or restore above.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {completedJobs.map((j) => {
+                const isSuccess = j.status === 'SUCCESS';
+                const isExpanded = expandedJobId === j.job_id;
+
+                return (
+                  <div
+                    key={j.job_id}
+                    className={`rounded-xl border transition overflow-hidden ${
+                      isExpanded
+                        ? 'bg-slate-900/80 border-purple-500/40 shadow-lg shadow-purple-500/5'
+                        : 'bg-slate-900/40 border-white/[0.08] hover:border-white/20'
+                    }`}
+                  >
+                    <div
+                      onClick={() => setExpandedJobId(prev => prev === j.job_id ? null : j.job_id)}
+                      className="p-3.5 flex items-center justify-between gap-3 cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 flex-shrink-0 ${
+                          isSuccess
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                        }`}>
+                          {isSuccess ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                          {j.status}
+                        </span>
+
+                        <span className="font-mono text-xs text-white font-bold flex-shrink-0">
+                          [{j.action_type}] {j.target_label || j.job_id}
+                        </span>
+
+                        <span className="text-[11px] text-slate-400 font-mono hidden md:inline truncate">
+                          ID: {j.job_id}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono text-slate-400">
+                        <span>{j.completed_at || j.submitted_at}</span>
+                        {j.elapsed_seconds && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-bold">
+                            {j.elapsed_seconds}s
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => handleDeleteJob(j.job_id, e)}
+                          className="p-1 rounded hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition"
+                          title="Delete Audit Entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        {isExpanded ? <ChevronUp className="w-4 h-4 text-purple-400" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-4 bg-slate-950/90 border-t border-white/5 space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Execution Output & Checksum Audit:
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-900 border border-white/5 font-mono text-xs text-purple-300 max-h-48 overflow-y-auto whitespace-pre-wrap custom-scrollbar">
+                          {j.output || j.recent_logs || (j.error ? `Error: ${j.error}` : "Job executed with no output.")}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

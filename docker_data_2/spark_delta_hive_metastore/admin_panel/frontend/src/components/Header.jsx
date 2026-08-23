@@ -1,7 +1,9 @@
-import React from 'react';
-import { Activity, ExternalLink, Zap, Server, Shield, Database, Terminal, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Activity, ExternalLink, Zap, Server, Shield, Database, Terminal, Globe, Loader2 } from 'lucide-react';
 
-export default function Header({ clusterOnline, unhealthyCount, wsConnected, activeProfile, services = [] }) {
+export default function Header({ clusterOnline, unhealthyCount, wsConnected, activeProfile, services = [], onNavigateTab }) {
+  const [activeJobsSummary, setActiveJobsSummary] = useState([]);
+
   const portals = [
     { name: 'Hue', port: 8888, icon: '🎨', serviceKey: 'hue', color: 'hover:text-indigo-400 hover:border-indigo-500/40' },
     { name: 'Spark', port: 8089, icon: '⚡', serviceKey: 'spark', color: 'hover:text-sky-400 hover:border-sky-500/40' },
@@ -10,6 +12,35 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
     { name: 'MinIO', port: 9001, icon: '🪣', serviceKey: 'minio', color: 'hover:text-rose-400 hover:border-rose-500/40' },
     { name: 'pgAdmin', port: 8081, icon: '🛠️', serviceKey: 'pgadmin', color: 'hover:text-purple-400 hover:border-purple-500/40' },
   ];
+
+  const pollActiveJobs = async () => {
+    try {
+      const [ingRes, sqlRes, bkpRes] = await Promise.all([
+        fetch('/api/ingestion/jobs').then(r => r.json()).catch(() => ({ jobs: [] })),
+        fetch('/api/sql/jobs').then(r => r.json()).catch(() => ({ jobs: [] })),
+        fetch('/api/backup/jobs').then(r => r.json()).catch(() => ({ jobs: [] }))
+      ]);
+
+      const runningIng = (ingRes.jobs || []).filter(j => j.status === 'RUNNING');
+      const runningSql = (sqlRes.jobs || []).filter(j => j.status === 'RUNNING');
+      const runningBkp = (bkpRes.jobs || []).filter(j => j.status === 'RUNNING');
+
+      const summary = [];
+      if (runningIng.length > 0) summary.push({ type: 'Ingestion', count: runningIng.length, tab: 'ingestion' });
+      if (runningSql.length > 0) summary.push({ type: 'SQL', count: runningSql.length, tab: 'sql_studio' });
+      if (runningBkp.length > 0) summary.push({ type: 'Backup', count: runningBkp.length, tab: 'backup' });
+
+      setActiveJobsSummary(summary);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    pollActiveJobs();
+    const interval = setInterval(pollActiveJobs, 2500);
+    return () => clearInterval(interval);
+  }, []);
 
   const isServiceRunning = (key) => {
     const svc = services.find(s => 
@@ -21,6 +52,8 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
     );
     return svc ? (svc.status === 'RUNNING' && svc.health !== 'UNHEALTHY' && svc.health !== 'STARTING / UNREACHABLE' && svc.health !== 'DEGRADED') : false;
   };
+
+  const totalRunningJobs = activeJobsSummary.reduce((acc, curr) => acc + curr.count, 0);
 
   return (
     <header className="sticky top-0 z-50 bg-[#07090e]/85 backdrop-blur-xl border-b border-white/[0.08] px-6 py-3">
@@ -54,8 +87,21 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
         </div>
 
         {/* Global Telemetry & Status Badges (Uniform Height: h-8) */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           
+          {/* In-Flight Background Action Status Indicator (Applies across all tabs) */}
+          {totalRunningJobs > 0 && (
+            <div 
+              className="flex items-center gap-2 h-8 px-3 rounded-lg bg-purple-950/70 border border-purple-500/50 text-purple-300 text-xs font-bold animate-pulse shadow-lg shadow-purple-500/20"
+              title="Active distributed background tasks running in cluster"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />
+              <span>
+                {totalRunningJobs} In-Flight Action{totalRunningJobs > 1 ? 's' : ''} ({activeJobsSummary.map(s => `${s.type}: ${s.count}`).join(', ')})
+              </span>
+            </div>
+          )}
+
           {/* Active Profile Pill */}
           <div className="hidden lg:flex items-center gap-1.5 h-8 px-3 rounded-lg bg-slate-900/80 border border-white/10 text-xs font-medium">
             <Zap className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
@@ -94,19 +140,15 @@ export default function Header({ clusterOnline, unhealthyCount, wsConnected, act
                   className={`h-8 px-2.5 rounded-lg bg-slate-900/70 hover:bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-300 transition-all flex items-center gap-1.5 group ${p.color}`}
                   title={`Open ${p.name} (Port ${p.port}) • Status: ${running ? 'Running' : 'Stopped'}`}
                 >
-                  {/* Small Status Bulb */}
                   <span className="relative flex h-2 w-2 flex-shrink-0">
                     {running && (
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     )}
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                      running ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-rose-500 shadow-sm shadow-rose-500/80'
-                    }`}></span>
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${running ? 'bg-emerald-500' : 'bg-slate-600'}`}></span>
                   </span>
-
-                  <span className="text-xs">{p.icon}</span>
-                  <span>{p.name}</span>
-                  <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-100 transition flex-shrink-0" />
+                  <span>{p.icon}</span>
+                  <span className="font-semibold">{p.name}</span>
+                  <ExternalLink className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 transition-opacity" />
                 </a>
               );
             })}
