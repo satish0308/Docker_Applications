@@ -73,19 +73,66 @@ async def websocket_events_endpoint(websocket: WebSocket):
 
 @app.websocket("/api/ws/logs/{container_name}")
 async def websocket_container_logs(websocket: WebSocket, container_name: str):
-    """Streams live line-by-line container logs directly to client terminal."""
+    """Streams live line-by-line container logs asynchronously with non-blocking producer-consumer queue."""
     await websocket.accept()
     try:
         client = docker.from_env()
-        container = client.containers.get(container_name)
-        log_stream = container.logs(stream=True, follow=True, tail=100)
-        for chunk in log_stream:
-            await websocket.send_text(chunk.decode('utf-8', errors='ignore'))
+        # Resolve container by exact name or substring matching
+        container = None
+        try:
+            container = client.containers.get(container_name)
+        except Exception:
+            for c in client.containers.list(all=True):
+                if container_name.lower() in c.name.lower():
+                    container = c
+                    break
+        
+        if not container:
+            await websocket.send_text(f"⚠️ Container '{container_name}' not found on host.\n")
+            await websocket.close()
+            return
+
+        if container.status.lower() != "running":
+            prev_logs = container.logs(tail=100).decode('utf-8', errors='ignore')
+            await websocket.send_text(f"ℹ️ Container '{container.name}' is currently {container.status.upper()}.\n--- Previous Logs (Tail 100) ---\n")
+            await websocket.send_text(prev_logs)
+            return
+
+        # Running container: stream logs asynchronously without blocking event loop
+        queue = asyncio.Queue(maxsize=500)
+        loop = asyncio.get_running_loop()
+        stop_event = threading.Event()
+
+        def log_producer():
+            try:
+                log_stream = container.logs(stream=True, follow=True, tail=100)
+                for chunk in log_stream:
+                    if stop_event.is_set():
+                        break
+                    text = chunk.decode('utf-8', errors='ignore')
+                    asyncio.run_coroutine_threadsafe(queue.put(text), loop)
+            except Exception:
+                pass
+            finally:
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+        producer_thread = threading.Thread(target=log_producer, daemon=True)
+        producer_thread.start()
+
+        try:
+            while True:
+                line = await queue.get()
+                if line is None:
+                    break
+                await websocket.send_text(line)
+        finally:
+            stop_event.set()
+
     except WebSocketDisconnect:
         pass
     except Exception as ex:
         try:
-            await websocket.send_text(f"[Log Stream Error]: {ex}\n")
+            await websocket.send_text(f"[Log Stream Notice]: {ex}\n")
         except Exception:
             pass
 
