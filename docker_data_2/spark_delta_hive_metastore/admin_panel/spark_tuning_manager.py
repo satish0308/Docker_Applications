@@ -339,10 +339,35 @@ def build_spark_submit_conf_args(params):
 
 def get_spark_master_metrics():
     """Queries Spark Master JSON API to retrieve real-time cluster compute metrics."""
-    endpoints = ["http://spark:8080/json/", "http://localhost:8089/json/"]
+    default_disconnected = {
+        "status": "disconnected",
+        "master_url": "spark://spark:7077",
+        "total_workers": 0,
+        "alive_workers": 0,
+        "total_cores": 0,
+        "cores_used": 0,
+        "cores_free": 0,
+        "total_memory_mb": 0,
+        "memory_used_mb": 0,
+        "memory_free_mb": 0,
+        "active_apps_count": 0,
+        "active_apps": [],
+        "worker_list": []
+    }
+    
+    # Check if spark container is running first to avoid timeout
+    try:
+        client = docker.from_env()
+        spark_c = client.containers.get("spark")
+        if spark_c.status.lower() != "running":
+            return default_disconnected
+    except Exception:
+        return default_disconnected
+
+    endpoints = ["http://spark:8089/json/", "http://spark:8080/json/", "http://localhost:8089/json/"]
     for ep in endpoints:
         try:
-            req = urllib.request.urlopen(ep, timeout=3)
+            req = urllib.request.urlopen(ep, timeout=1)
             data = json.loads(req.read().decode('utf-8'))
             workers = data.get("workers", [])
             alive_workers = [w for w in workers if w.get("state") == "ALIVE"]
@@ -379,22 +404,8 @@ def get_spark_master_metrics():
                 ]
             }
         except Exception:
-            pass
-    return {
-        "status": "disconnected",
-        "master_url": "spark://spark:7077",
-        "total_workers": 0,
-        "alive_workers": 0,
-        "total_cores": 0,
-        "cores_used": 0,
-        "cores_free": 0,
-        "total_memory_mb": 0,
-        "memory_used_mb": 0,
-        "memory_free_mb": 0,
-        "active_apps_count": 0,
-        "active_apps": [],
-        "worker_list": []
-    }
+            continue
+    return default_disconnected
 
 def scale_cluster_workers(target_count, worker_memory="8g", worker_cores=4):
     """Scales Spark Worker containers up or down and configures node memory & CPU capacity."""
