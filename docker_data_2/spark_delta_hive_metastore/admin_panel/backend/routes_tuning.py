@@ -1,6 +1,7 @@
 """
 Spark Tuning & Cluster Scaling API Router
-Provides endpoints for workload sizing profiles, dynamic resource allocation (DRA), and horizontal worker fleet scaling.
+Provides endpoints for workload sizing profiles, dynamic resource allocation (DRA), custom parameter compilation,
+horizontal worker fleet scaling, and live Spark Master telemetry.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -19,16 +20,34 @@ class ProfileApplyRequest(BaseModel):
     profile_name: str
     custom_params: Optional[Dict[str, Any]] = None
 
+class CompileCommandRequest(BaseModel):
+    params: Dict[str, Any]
+    script_name: Optional[str] = "<job_script.py>"
+
 @router.get("/config")
 def get_tuning_config():
-    """Returns the current active tuning profile, cluster metrics, and presets."""
+    """Returns the current active tuning profile, active params, cluster metrics, presets, and connection strings."""
     cfg = spark_tuning_manager.load_tuning_config()
     metrics = spark_tuning_manager.get_spark_master_metrics()
+    active_profile_name = cfg.get("active_profile", "🔴 Heavy (Large Big Data / >10M Rows)")
+    active_params = cfg.get("params", spark_tuning_manager.PROFILES.get("🔴 Heavy (Large Big Data / >10M Rows)", {}))
+    
+    connections = {
+        "spark_rpc": "spark://spark:7077",
+        "spark_master_ui": "http://localhost:8089",
+        "spark_history_ui": "http://localhost:18080",
+        "spark_thriftserver": "localhost:10000",
+        "livy_rest_api": "http://localhost:8998",
+        "hdfs_namenode": "hdfs://namenode:9000"
+    }
+
     return {
-        "active_profile": cfg.get("active_profile", "🔴 Heavy (Large Big Data / >10M Rows)"),
+        "active_profile": active_profile_name,
+        "active_params": active_params,
         "config": cfg,
         "metrics": metrics,
-        "presets": spark_tuning_manager.PROFILES
+        "presets": spark_tuning_manager.PROFILES,
+        "connections": connections
     }
 
 @router.post("/scale-workers")
@@ -45,13 +64,28 @@ def scale_workers(req: ScalingRequest):
 
 @router.post("/apply-profile")
 def apply_profile(req: ProfileApplyRequest):
-    """Applies a workload sizing profile across spark-defaults, Livy, and Hue."""
-    profile_data = spark_tuning_manager.PROFILES.get(req.profile_name)
-    if not profile_data:
-        raise HTTPException(status_code=400, detail="Profile not found.")
+    """Applies a workload sizing profile or custom parameters across spark-defaults, Livy, and Hue."""
+    if req.custom_params:
+        profile_data = req.custom_params
+    else:
+        profile_data = spark_tuning_manager.PROFILES.get(req.profile_name)
+        if not profile_data:
+            raise HTTPException(status_code=400, detail="Profile not found.")
     
-    spark_tuning_manager.update_spark_defaults_conf(profile_data)
-    spark_tuning_manager.update_livy_conf(profile_data)
-    spark_tuning_manager.update_hue_ini(profile_data)
     spark_tuning_manager.save_tuning_config({"active_profile": req.profile_name, "params": profile_data})
-    return {"status": "SUCCESS", "message": f"Profile '{req.profile_name}' applied successfully."}
+    cmd_flags = spark_tuning_manager.build_spark_submit_conf_args(profile_data)
+    
+    return {
+        "status": "SUCCESS",
+        "message": f"Profile '{req.profile_name}' applied successfully across Spark, Livy, and Hue!",
+        "generated_command": f"/opt/spark/bin/spark-submit {cmd_flags} <job_script.py>"
+    }
+
+@router.post("/compile-command")
+def compile_command(req: CompileCommandRequest):
+    """Compiles spark-submit CLI flags from parameter dictionary."""
+    cmd_flags = spark_tuning_manager.build_spark_submit_conf_args(req.params)
+    return {
+        "flags": cmd_flags,
+        "full_command": f"/opt/spark/bin/spark-submit {cmd_flags} {req.script_name}"
+    }
