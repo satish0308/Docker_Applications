@@ -327,6 +327,8 @@ spark = SparkSession.builder \\
     .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \\
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \\
     .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \\
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
@@ -349,14 +351,25 @@ for batch_idx in range(total_batches):
     else:
         df_batch = spark.read.option("header", "true").option("inferSchema", "true").csv(batch_files)
 
+    cleaned_cols = []
     for c in df_batch.columns:
         clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
         clean_c = re.sub(r'_+', '_', clean_c).strip('_')
         if clean_c and clean_c[0].isdigit():
             clean_c = f"col_{{clean_c}}"
-        clean_c = clean_c if clean_c else "unnamed_col"
-        if clean_c != c:
-            df_batch = df_batch.withColumnRenamed(c, clean_c)
+        cleaned_cols.append(clean_c if clean_c else "unnamed_col")
+    
+    seen = {{}}
+    deduped = []
+    for c in cleaned_cols:
+        if c in seen:
+            seen[c] += 1
+            deduped.append(f"{{c}}_{{seen[c]}}")
+        else:
+            seen[c] = 0
+            deduped.append(c)
+
+    df_batch = df_batch.toDF(*deduped)
 
     df_batch = df_batch.coalesce(4)
     batch_row_count = df_batch.count()
@@ -504,6 +517,8 @@ spark = SparkSession.builder \\
     .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \\
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \\
     .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \\
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
@@ -511,14 +526,25 @@ t0 = time.time()
 print("--> 🚀 [Batch 1/1] Reading /tmp/{filename}...")
 df = {reader_code}
 
-for c in df.columns:
-    clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
-    clean_c = re.sub(r'_+', '_', clean_c).strip('_')
-    if clean_c and clean_c[0].isdigit():
-        clean_c = f"col_{{clean_c}}"
-    clean_c = clean_c if clean_c else "unnamed_col"
-    if clean_c != c:
-        df = df.withColumnRenamed(c, clean_c)
+    cleaned_cols = []
+    for c in df.columns:
+        clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+        clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+        if clean_c and clean_c[0].isdigit():
+            clean_c = f"col_{{clean_c}}"
+        cleaned_cols.append(clean_c if clean_c else "unnamed_col")
+    
+    seen = {{}}
+    deduped = []
+    for c in cleaned_cols:
+        if c in seen:
+            seen[c] += 1
+            deduped.append(f"{{c}}_{{seen[c]}}")
+        else:
+            seen[c] = 0
+            deduped.append(c)
+
+    df = df.toDF(*deduped).coalesce(4)
 
 row_count = df.count()
 print(f"--> Ingesting {{row_count:,}} rows into '{target_database}.{target_table}' ({table_format})...")

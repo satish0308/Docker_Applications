@@ -50,6 +50,8 @@ def clean_spark_sql_output(raw_output: str) -> str:
            stripped.startswith("To adjust logging level use") or \
            stripped.startswith("Spark Web UI available at") or \
            stripped.startswith("Spark master:") or \
+           "WARN MetricsConfig:" in stripped or \
+           "WARN SparkStringUtils:" in stripped or \
            "WARN Utils: Service 'SparkUI'" in stripped or \
            "WARN NativeCodeLoader:" in stripped or \
            "HiveConf of name" in stripped or \
