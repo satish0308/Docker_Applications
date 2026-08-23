@@ -1,6 +1,7 @@
 """
 Data Ingestion API Router
-Handles micro-batch dataset uploads, schema detection, type overrides, and dynamic partition registration into Delta Lake / Hive.
+Supports chunked multi-file ingestion from server datasets (e.g. /data/df_inv_3),
+micro-batch uploads, schema detection, type overrides, dynamic partitioning, and S3A/HDFS destinations.
 """
 
 import os
@@ -8,6 +9,7 @@ import json
 import time
 import uuid
 import re
+import glob
 import threading
 import docker
 import pandas as pd
@@ -53,7 +55,14 @@ def copy_data_to_container(container, file_bytes: bytes, dest_dir: str, filename
     tar_stream.seek(0)
     container.put_archive(dest_dir, tar_stream.read())
 
-def run_ingestion_job_thread(job_id: str, spark_script: str, script_filename: str, chosen_params: dict):
+def run_chunked_ingestion_job_thread(
+    job_id: str,
+    spark_script: str,
+    script_filename: str,
+    chosen_params: dict,
+    total_chunks: int = 1
+):
+    """Background worker thread executing Spark ingestion with streaming progress parsing."""
     try:
         client = docker.from_env()
         spark_cont = client.containers.get("spark")
@@ -62,43 +71,267 @@ def run_ingestion_job_thread(job_id: str, spark_script: str, script_filename: st
         tuning_flags = spark_tuning_manager.build_spark_submit_conf_args(chosen_params)
         cmd = f"/opt/spark/bin/spark-submit {tuning_flags} /tmp/{script_filename}"
 
-        update_job_record(job_id, status="RUNNING", progress_pct=15, current_batch_msg="Spark submit launched...")
+        update_job_record(job_id, status="RUNNING", progress_pct=10, current_batch_msg="Spark submit launched...")
+
+        exec_stream = spark_cont.exec_run(cmd, stream=True)
+        full_output_lines = []
+        for stream_bytes in exec_stream.output:
+            chunk_str = stream_bytes.decode('utf-8', errors='ignore')
+            full_output_lines.append(chunk_str)
+            for line in chunk_str.splitlines():
+                if "--> 🚀 [Batch" in line:
+                    clean_msg = line.replace('--> ', '').strip()
+                    match = re.search(r'\[Batch (\d+)/(\d+)\]', line)
+                    curr_b = int(match.group(1)) if match else 1
+                    max_b = int(match.group(2)) if match else total_chunks
+                    update_job_record(
+                        job_id,
+                        current_chunk=curr_b,
+                        current_batch_msg=clean_msg,
+                        progress_pct=min(10 + int((curr_b / max_b) * 85), 95),
+                        last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        recent_logs="\n".join(full_output_lines[-40:])
+                    )
+                elif "--> ✅ [Batch" in line:
+                    clean_msg = line.replace('--> ', '').strip()
+                    update_job_record(
+                        job_id,
+                        last_committed_msg=clean_msg,
+                        last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        recent_logs="\n".join(full_output_lines[-40:])
+                    )
+
+        output = "".join(full_output_lines)
         
-        res = spark_cont.exec_run(cmd)
-        output = res.output.decode('utf-8', errors='ignore')
-        
-        if res.exit_code == 0:
+        if "__RESULT_SUCCESS__" in output:
+            row_count_res = "N/A"
+            time_taken_res = "N/A"
+            for line in output.splitlines():
+                if "__RESULT_SUCCESS__" in line:
+                    parts = line.split("|")
+                    if len(parts) >= 3:
+                        try:
+                            row_count_res = f"{int(parts[1]):,}"
+                        except Exception:
+                            row_count_res = parts[1]
+                        try:
+                            time_taken_res = f"{float(parts[2]):.2f}s"
+                        except Exception:
+                            time_taken_res = f"{parts[2]}s"
+
             update_job_record(
                 job_id,
-                status="COMPLETED",
+                status="SUCCESS",
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                total_rows=row_count_res,
+                elapsed_seconds=time_taken_res,
                 progress_pct=100,
-                current_batch_msg="Dataset successfully ingested into Delta Lake.",
-                last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                recent_logs=output[-1500:]
+                current_batch_msg=f"Ingestion complete ({row_count_res} rows in {time_taken_res})",
+                recent_logs="\n".join(full_output_lines[-50:])
             )
         else:
+            err_snip = output[-2000:] if len(output) > 2000 else output
             update_job_record(
                 job_id,
                 status="FAILED",
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                error_msg=err_snip,
+                current_batch_msg="Ingestion failed. Check logs.",
                 progress_pct=100,
-                current_batch_msg="Ingestion failed.",
-                last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                recent_logs=output[-1500:]
+                recent_logs="\n".join(full_output_lines[-50:])
             )
     except Exception as ex:
         update_job_record(
             job_id,
             status="FAILED",
-            progress_pct=100,
+            finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            error_msg=str(ex),
             current_batch_msg=f"Error: {ex}",
-            last_updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            recent_logs=str(ex)
+            progress_pct=100
         )
 
 @router.get("/jobs")
 def get_ingestion_jobs():
     """Returns list of all active and historical ingestion jobs."""
     return {"jobs": load_ingestion_jobs()}
+
+@router.delete("/jobs/{job_id}")
+def delete_ingestion_job(job_id: str):
+    """Deletes a job record from history."""
+    jobs = load_ingestion_jobs()
+    jobs = [j for j in jobs if j.get("job_id") != job_id]
+    save_ingestion_jobs(jobs)
+    return {"status": "SUCCESS", "message": f"Job {job_id} deleted."}
+
+def resolve_data_dir():
+    for candidate in ["/data", "/workspace/data", "/home/satish/Docker_Applications/docker_data_2/spark_delta_hive_metastore/data", "data"]:
+        if os.path.exists(candidate) and os.path.isdir(candidate):
+            return candidate
+    return "/data"
+
+@router.get("/server-datasets")
+def list_server_datasets():
+    """Lists pre-staged datasets available in /data directory."""
+    data_dir = resolve_data_dir()
+    datasets = []
+    if os.path.exists(data_dir):
+        for item in os.listdir(data_dir):
+            item_path = os.path.join(data_dir, item)
+            if os.path.isdir(item_path) and not item.startswith("."):
+                files = [f for f in os.listdir(item_path) if not f.startswith(".")]
+                parquet_files = [f for f in files if f.endswith(".parquet") or f.endswith(".pq")]
+                total_bytes = sum(os.path.getsize(os.path.join(item_path, f)) for f in files if os.path.isfile(os.path.join(item_path, f)))
+                mb = round(total_bytes / (1024 * 1024), 2)
+                datasets.append({
+                    "name": item,
+                    "container_path": f"/data/{item}",
+                    "file_count": len(files),
+                    "parquet_count": len(parquet_files),
+                    "size_mb": mb,
+                    "is_parquet": len(parquet_files) > 0
+                })
+    return {"datasets": datasets}
+
+class ServerDatasetIngestRequest(BaseModel):
+    dataset_name: str
+    target_database: str = "default"
+    target_table: str = "inventory_ingested"
+    table_format: str = "delta" # "delta" or "parquet"
+    write_mode: str = "overwrite" # "overwrite" or "append"
+    dest_storage: str = "s3" # "s3" or "hdfs"
+    chunk_size: int = 100
+    partition_cols: Optional[str] = ""
+
+@router.post("/submit-server-dataset")
+def submit_server_dataset_ingestion(req: ServerDatasetIngestRequest):
+    """Initiates high-throughput chunked ingestion for pre-staged datasets in /data/."""
+    job_id = f"ingest_{req.target_table}_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+    
+    data_dir = resolve_data_dir()
+    dataset_fs_path = os.path.join(data_dir, req.dataset_name)
+    
+    if not os.path.exists(dataset_fs_path):
+        raise HTTPException(status_code=404, detail=f"Dataset folder '{req.dataset_name}' not found in /data.")
+    
+    files = sorted([
+        f"/data/{req.dataset_name}/{f}"
+        for f in os.listdir(dataset_fs_path)
+        if not f.startswith(".") and not f.startswith("_") and (f.endswith(".parquet") or f.endswith(".csv") or f.endswith(".json"))
+    ])
+    
+    if not files:
+        raise HTTPException(status_code=400, detail="No readable Parquet/CSV/JSON files found in dataset folder.")
+    
+    total_files = len(files)
+    chunk_size = max(10, req.chunk_size)
+    total_batches = (total_files + chunk_size - 1) // chunk_size
+
+    is_s3 = req.dest_storage == "s3"
+    dest_path = f"s3a://warehouse/{req.target_table}/" if is_s3 else f"hdfs://namenode:9000/user/hive/warehouse/{req.target_table}/"
+    is_delta = req.table_format == "delta"
+
+    part_cols_list = [f'"{c.strip()}"' for c in (req.partition_cols or "").split(",") if c.strip()]
+    partition_expr = f".partitionBy({', '.join(part_cols_list)})" if part_cols_list else ""
+
+    spark_script = f"""#!/usr/bin/env python3
+import time
+import re
+import json
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+
+spark = SparkSession.builder \\
+    .appName("Ingest_{req.target_table}") \\
+    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \\
+    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \\
+    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \\
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \\
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \\
+    .enableHiveSupport() \\
+    .getOrCreate()
+
+t0 = time.time()
+source_paths = {json.dumps(files)}
+total_files = len(source_paths)
+CHUNK_SIZE = {chunk_size}
+total_batches = (total_files + CHUNK_SIZE - 1) // CHUNK_SIZE if total_files > 0 else 1
+total_rows_ingested = 0
+
+for batch_idx in range(total_batches):
+    batch_files = source_paths[batch_idx * CHUNK_SIZE : (batch_idx + 1) * CHUNK_SIZE]
+    batch_files = [f"file://{{f}}" if not f.startswith("file://") and not f.startswith("hdfs://") and not f.startswith("s3a://") else f for f in batch_files]
+    print(f"\\n--> 🚀 [Batch {{batch_idx+1}}/{{total_batches}}] Reading {{len(batch_files)}} files (Files {{batch_idx*CHUNK_SIZE+1}} to {{min((batch_idx+1)*CHUNK_SIZE, total_files)}})...")
+    
+    if batch_files[0].endswith(".parquet") or "parquet" in batch_files[0]:
+        df_batch = spark.read.parquet(*batch_files)
+    elif batch_files[0].endswith(".json"):
+        df_batch = spark.read.json(batch_files)
+    else:
+        df_batch = spark.read.option("header", "true").option("inferSchema", "true").csv(batch_files)
+
+    for c in df_batch.columns:
+        clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+        clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+        if clean_c and clean_c[0].isdigit():
+            clean_c = f"col_{{clean_c}}"
+        clean_c = clean_c if clean_c else "unnamed_col"
+        if clean_c != c:
+            df_batch = df_batch.withColumnRenamed(c, clean_c)
+
+    batch_row_count = df_batch.count()
+    total_rows_ingested += batch_row_count
+
+    mode_to_use = "{req.write_mode}" if batch_idx == 0 else "append"
+
+    if {str(is_delta).lower()}:
+        writer = df_batch.write.format("delta").mode(mode_to_use){partition_expr}
+        if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+            writer.option("path", "{dest_path}")
+        writer.saveAsTable("{req.target_database}.{req.target_table}")
+    else:
+        writer = df_batch.write.format("parquet").mode(mode_to_use){partition_expr}
+        if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+            writer.option("path", "{dest_path}")
+        writer.saveAsTable("{req.target_database}.{req.target_table}")
+
+    print(f"--> ✅ [Batch {{batch_idx+1}}/{{total_batches}}] Finished committing {{batch_row_count:,}} rows (Cumulative: {{total_rows_ingested:,}} rows)")
+
+elapsed = time.time() - t0
+print(f"\\n🏆 Ingestion Complete: {{total_rows_ingested:,}} total rows across {{total_files}} files in {{elapsed:.2f}}s")
+print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
+spark.stop()
+"""
+    tuning_cfg = spark_tuning_manager.load_tuning_config()
+    params = tuning_cfg.get("params", spark_tuning_manager.PROFILES.get("🔴 Heavy (Large Big Data / >10M Rows)"))
+
+    job_record = {
+        "job_id": job_id,
+        "target_database": req.target_database,
+        "target_table": req.target_table,
+        "format": req.table_format,
+        "write_mode": req.write_mode,
+        "dest_storage": req.dest_storage,
+        "total_source_files": total_files,
+        "total_chunks": total_batches,
+        "current_chunk": 0,
+        "partition_cols": req.partition_cols,
+        "status": "QUEUED",
+        "progress_pct": 5,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "current_batch_msg": f"Queued {total_files} files in {total_batches} batches..."
+    }
+    jobs = load_ingestion_jobs()
+    jobs.insert(0, job_record)
+    save_ingestion_jobs(jobs)
+
+    t = threading.Thread(
+        target=run_chunked_ingestion_job_thread,
+        args=(job_id, spark_script, f"script_{job_id}.py", params, total_batches),
+        daemon=True
+    )
+    t.start()
+
+    return {"status": "SUCCESS", "job_id": job_id, "total_files": total_files, "total_batches": total_batches}
 
 @router.post("/preview-schema")
 async def preview_schema(file: UploadFile = File(...)):
@@ -147,25 +380,25 @@ async def submit_ingestion_job(
     target_table: str = Form("sales_ingested"),
     table_format: str = Form("delta"),
     write_mode: str = Form("append"),
+    dest_storage: str = Form("s3"),
     partition_cols: Optional[str] = Form("")
 ):
-    """Submits a dataset file for chunked ingestion and metadata registration."""
+    """Submits an uploaded dataset file for chunked ingestion and metadata registration."""
     try:
         content = await file.read()
         filename = file.filename
-        job_id = f"ingest_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        job_id = f"ingest_{target_table}_{int(time.time())}_{uuid.uuid4().hex[:4]}"
 
-        # Copy data file to spark container
         client = docker.from_env()
         spark_cont = client.containers.get("spark")
         copy_data_to_container(spark_cont, content, "/tmp", filename)
 
-        # Build PySpark Ingestion Script
-        partition_expr = ""
-        if partition_cols and partition_cols.strip():
-            cols = [f'"{c.strip()}"' for c in partition_cols.split(",") if c.strip()]
-            if cols:
-                partition_expr = f".partitionBy({', '.join(cols)})"
+        part_cols_list = [f'"{c.strip()}"' for c in (partition_cols or "").split(",") if c.strip()]
+        partition_expr = f".partitionBy({', '.join(part_cols_list)})" if part_cols_list else ""
+
+        is_s3 = dest_storage == "s3"
+        dest_path = f"s3a://warehouse/{target_table}/" if is_s3 else f"hdfs://namenode:9000/user/hive/warehouse/{target_table}/"
+        is_delta = table_format == "delta"
 
         # Determine reader code based on file format extension
         fn_lower = filename.lower()
@@ -177,6 +410,8 @@ async def submit_ingestion_job(
             reader_code = f'spark.read.option("header", "true").option("inferSchema", "true").csv("file:///tmp/{filename}")'
 
         spark_script = f"""#!/usr/bin/env python3
+import time
+import re
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder \\
@@ -189,39 +424,65 @@ spark = SparkSession.builder \\
     .enableHiveSupport() \\
     .getOrCreate()
 
+t0 = time.time()
 print("--> 🚀 [Batch 1/1] Reading /tmp/{filename}...")
 df = {reader_code}
 
-print(f"--> [Batch 1/1] Ingesting rows into table '{target_database}.{target_table}' ({table_format})...")
-df.write.format("{table_format}").mode("{write_mode}"){partition_expr}.saveAsTable("{target_database}.{target_table}")
+for c in df.columns:
+    clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+    clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+    if clean_c and clean_c[0].isdigit():
+        clean_c = f"col_{{clean_c}}"
+    clean_c = clean_c if clean_c else "unnamed_col"
+    if clean_c != c:
+        df = df.withColumnRenamed(c, clean_c)
 
-print("--> ✅ [Batch 1/1] Ingestion completed successfully.")
+row_count = df.count()
+print(f"--> Ingesting {{row_count:,}} rows into '{target_database}.{target_table}' ({table_format})...")
+
+if {str(is_delta).lower()}:
+    writer = df.write.format("delta").mode("{write_mode}"){partition_expr}
+    if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+        writer.option("path", "{dest_path}")
+    writer.saveAsTable("{target_database}.{target_table}")
+else:
+    writer = df.write.format("parquet").mode("{write_mode}"){partition_expr}
+    if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+        writer.option("path", "{dest_path}")
+    writer.saveAsTable("{target_database}.{target_table}")
+
+elapsed = time.time() - t0
+print(f"--> ✅ [Batch 1/1] Finished committing {{row_count:,}} rows.")
+print(f"\\n🏆 Ingestion Complete: {{row_count:,}} total rows in {{elapsed:.2f}}s")
+print(f"__RESULT_SUCCESS__|{{row_count}}|{{elapsed:.2f}}")
 spark.stop()
 """
         tuning_cfg = spark_tuning_manager.load_tuning_config()
         params = tuning_cfg.get("params", spark_tuning_manager.PROFILES.get("🟢 Light (Small Files / Interactive)"))
 
-        # Save initial job record
         job_record = {
             "job_id": job_id,
             "target_database": target_database,
             "target_table": target_table,
             "format": table_format,
             "write_mode": write_mode,
+            "dest_storage": dest_storage,
+            "total_source_files": 1,
+            "total_chunks": 1,
+            "current_chunk": 0,
             "partition_cols": partition_cols,
             "status": "QUEUED",
             "progress_pct": 5,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "current_batch_msg": "Job submitted to Spark worker..."
+            "current_batch_msg": "Job submitted to Spark cluster..."
         }
         jobs = load_ingestion_jobs()
         jobs.insert(0, job_record)
         save_ingestion_jobs(jobs)
 
-        # Spawn background execution thread
         t = threading.Thread(
-            target=run_ingestion_job_thread,
-            args=(job_id, spark_script, f"script_{job_id}.py", params),
+            target=run_chunked_ingestion_job_thread,
+            args=(job_id, spark_script, f"script_{job_id}.py", params, 1),
             daemon=True
         )
         t.start()
