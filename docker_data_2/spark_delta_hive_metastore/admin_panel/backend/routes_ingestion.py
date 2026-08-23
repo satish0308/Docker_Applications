@@ -167,7 +167,15 @@ async def submit_ingestion_job(
             if cols:
                 partition_expr = f".partitionBy({', '.join(cols)})"
 
-        dest_path = f"s3a://warehouse/{target_database}.db/{target_table}"
+        # Determine reader code based on file format extension
+        fn_lower = filename.lower()
+        if fn_lower.endswith(".parquet") or fn_lower.endswith(".pq") or "parquet" in fn_lower:
+            reader_code = f'spark.read.parquet("file:///tmp/{filename}")'
+        elif fn_lower.endswith(".json") or fn_lower.endswith(".jsonl"):
+            reader_code = f'spark.read.json("file:///tmp/{filename}")'
+        else:
+            reader_code = f'spark.read.option("header", "true").option("inferSchema", "true").csv("file:///tmp/{filename}")'
+
         spark_script = f"""#!/usr/bin/env python3
 from pyspark.sql import SparkSession
 
@@ -182,12 +190,12 @@ spark = SparkSession.builder \\
     .getOrCreate()
 
 print("--> 🚀 [Batch 1/1] Reading /tmp/{filename}...")
-df = spark.read.option("header", "true").option("inferSchema", "true").csv("/tmp/{filename}")
+df = {reader_code}
 
-print(f"--> [Batch 1/1] Writing {{df.count()}} rows to {dest_path}...")
+print(f"--> [Batch 1/1] Ingesting rows into table '{target_database}.{target_table}' ({table_format})...")
 df.write.format("{table_format}").mode("{write_mode}"){partition_expr}.saveAsTable("{target_database}.{target_table}")
 
-print("--> ✅ [Batch 1/1] Ingestion completed.")
+print("--> ✅ [Batch 1/1] Ingestion completed successfully.")
 spark.stop()
 """
         tuning_cfg = spark_tuning_manager.load_tuning_config()
