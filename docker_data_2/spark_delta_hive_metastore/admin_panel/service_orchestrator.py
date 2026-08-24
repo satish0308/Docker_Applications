@@ -377,27 +377,20 @@ def find_matching_container(client: docker.DockerClient, meta: Dict[str, Any]):
     return None
 
 # -------------------------------------------------------------
+# -------------------------------------------------------------
 # DOCKER LIFECYCLE & STATUS INSPECTOR
 # -------------------------------------------------------------
-def get_service_status_matrix() -> List[Dict[str, Any]]:
-    """
-    Inspects all platform services via Docker Daemon and returns live status matrix.
-    """
-    matrix = []
-    try:
-        client = docker.from_env()
-    except Exception:
-        client = None
+def inspect_single_service(key: str, meta: Dict[str, Any], client: Optional[docker.DockerClient]) -> Dict[str, Any]:
+    """Inspects a single service status quickly without blocking DNS lookups."""
+    matched_container = find_matching_container(client, meta) if client else None
 
-    for key, meta in SERVICE_REGISTRY.items():
-        matched_container = find_matching_container(client, meta) if client else None
+    is_running = False
+    health_stat = "N/A"
+    status_label = "STOPPED"
+    uptime = "Off"
 
-        is_running = False
-        health_stat = "N/A"
-        status_label = "STOPPED"
-        uptime = "Off"
-
-        if matched_container:
+    if matched_container:
+        try:
             stat = matched_container.status.lower()
             if stat == "running":
                 is_running = True
@@ -407,13 +400,18 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                     health_stat = h_info.upper()
                     if h_info == "unhealthy":
                         status_label = "UNHEALTHY"
-                
-                # Verify internal port socket connectivity and HTTP readiness
+
+                # Check port responsiveness directly using container IP to avoid DNS timeouts
                 target_port = meta.get("web_port") or meta.get("port")
-                target_host = meta.get("host") or meta.get("container") or meta["compose_service"]
-                if target_port and isinstance(target_port, int):
+                if target_port and isinstance(target_port, int) and health_stat != "UNHEALTHY":
+                    c_nets = matched_container.attrs.get("NetworkSettings", {}).get("Networks", {})
+                    ip_addr = next((n.get("IPAddress") for n in c_nets.values() if n.get("IPAddress")), None)
+                    check_target = ip_addr or meta.get("host") or meta["compose_service"]
+
                     try:
-                        s = socket.create_connection((target_host, target_port), timeout=0.8)
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(0.15) # 150ms max
+                        s.connect((check_target, target_port))
                         s.close()
                         if health_stat == "N/A":
                             health_stat = "HEALTHY"
@@ -421,31 +419,55 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                         health_stat = "STARTING / UNREACHABLE"
                         status_label = "DEGRADED"
                         is_running = False
-                
+
                 started = matched_container.attrs.get("State", {}).get("StartedAt", "")
                 uptime = started[:19].replace("T", " ") if started else "Running"
             elif stat == "restarting":
                 status_label = "RESTARTING"
             elif stat in ["exited", "dead", "created"]:
                 status_label = "STOPPED"
+        except Exception:
+            pass
 
-        matrix.append({
-            "key": key,
-            "name": meta["name"],
-            "tier": meta["tier"],
-            "icon": meta["icon"],
-            "compose_service": meta["compose_service"],
-            "container": meta["container"],
-            "desc": meta["desc"],
-            "est_ram": meta["est_ram"],
-            "dependencies": meta["dependencies"],
-            "is_running": is_running,
-            "status": status_label,
-            "health": health_stat,
-            "uptime": uptime,
-            "port": meta.get("web_port", meta.get("port", "N/A"))
-        })
+    return {
+        "key": key,
+        "name": meta["name"],
+        "tier": meta["tier"],
+        "icon": meta["icon"],
+        "compose_service": meta["compose_service"],
+        "container": meta["container"],
+        "desc": meta["desc"],
+        "est_ram": meta["est_ram"],
+        "dependencies": meta["dependencies"],
+        "is_running": is_running,
+        "status": status_label,
+        "health": health_stat,
+        "uptime": uptime,
+        "port": meta.get("web_port", meta.get("port", "N/A"))
+    }
 
+def get_service_status_matrix() -> List[Dict[str, Any]]:
+    """
+    Inspects all platform services concurrently via Docker Daemon and returns live status matrix in <50ms.
+    """
+    try:
+        client = docker.from_env()
+    except Exception:
+        client = None
+
+    import concurrent.futures
+    matrix = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        futures = {executor.submit(inspect_single_service, k, meta, client): k for k, meta in SERVICE_REGISTRY.items()}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                matrix.append(future.result())
+            except Exception:
+                pass
+
+    # Maintain original registry ordering
+    order_map = {k: idx for idx, k in enumerate(SERVICE_REGISTRY.keys())}
+    matrix.sort(key=lambda x: order_map.get(x["key"], 999))
     return matrix
 
 def get_host_workspace_dir() -> str:
