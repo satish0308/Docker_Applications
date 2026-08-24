@@ -5,6 +5,7 @@ Unit & Integration Tests for Table Backup & Disaster Recovery Engine
 import pytest
 import sys
 import os
+import time
 from fastapi.testclient import TestClient
 
 # Add admin_panel to python path
@@ -58,7 +59,8 @@ def test_execute_backup_command_construction(monkeypatch):
         "custom_backup_id": "backup_sales_test"
     })
     assert res1.status_code == 200
-    assert "backup --table default.sales --backup-id backup_sales_test" in executed_cmds[-1]
+    time.sleep(0.2)
+    assert any("backup --table default.sales --backup-id backup_sales_test" in cmd for cmd in executed_cmds)
 
     # Full Database Backup
     res2 = client.post("/api/backup/execute", json={
@@ -66,7 +68,8 @@ def test_execute_backup_command_construction(monkeypatch):
         "database": "analytics"
     })
     assert res2.status_code == 200
-    assert "backup-db --database analytics" in executed_cmds[-1]
+    time.sleep(0.2)
+    assert any("backup-db --database analytics" in cmd for cmd in executed_cmds)
 
 def test_execute_restore_command_construction(monkeypatch):
     """Validates that spark-submit restore command is constructed properly."""

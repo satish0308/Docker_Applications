@@ -22,8 +22,39 @@ import {
 } from 'lucide-react';
 
 export default function PodOrchestrator({ services, presets, onRefresh }) {
-  const [selectedPreset, setSelectedPreset] = useState("⚡ Spark Minimalist / PySpark Core");
-  const [selectedCustom, setSelectedCustom] = useState(["hue"]);
+  const [selectedPreset, setSelectedPresetState] = useState(() => {
+    return localStorage.getItem('bdp_selected_preset') || 
+           localStorage.getItem('bdp_last_initiated_preset') || 
+           "⚡ Spark Minimalist / PySpark Core";
+  });
+
+  const [lastInitiatedPreset, setLastInitiatedPreset] = useState(() => {
+    return localStorage.getItem('bdp_last_initiated_preset') || null;
+  });
+
+  const [lastInitiatedTime, setLastInitiatedTime] = useState(() => {
+    return localStorage.getItem('bdp_last_initiated_time') || null;
+  });
+
+  const [selectedCustom, setSelectedCustomState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bdp_custom_orchestrator_selection');
+      return saved ? JSON.parse(saved) : ["hue"];
+    } catch {
+      return ["hue"];
+    }
+  });
+
+  const setSelectedPreset = (pName) => {
+    setSelectedPresetState(pName);
+    localStorage.setItem('bdp_selected_preset', pName);
+  };
+
+  const setSelectedCustom = (arr) => {
+    setSelectedCustomState(arr);
+    localStorage.setItem('bdp_custom_orchestrator_selection', JSON.stringify(arr));
+  };
+
   const [resolvedChain, setResolvedChain] = useState([]);
   const [tierFilter, setTierFilter] = useState("All Tiers");
 
@@ -153,6 +184,12 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
 
   const handleStartPreset = (presetName) => {
     const targetServices = presets[presetName]?.services || [];
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' on ' + new Date().toLocaleDateString();
+    setLastInitiatedPreset(presetName);
+    setLastInitiatedTime(nowStr);
+    localStorage.setItem('bdp_last_initiated_preset', presetName);
+    localStorage.setItem('bdp_last_initiated_time', nowStr);
+    localStorage.setItem('bdp_selected_preset', presetName);
     runStreamingPipeline('/api/orchestrator/stream-start', { services: targetServices }, `Launch Profile: ${presetName}`);
   };
 
@@ -248,15 +285,12 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
               <span className="text-xs font-mono text-slate-400">
                 Step <span className="text-white font-bold">{activePipeline.currentStep}</span> / {activePipeline.total}
               </span>
-              {activePipeline.isFinished && (
-                <button
-                  onClick={() => setActivePipeline(null)}
-                  className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
-                  title="Close Pipeline View"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+              <button
+                onClick={() => setActivePipeline(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
@@ -268,68 +302,30 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
             />
           </div>
 
-          {/* HORIZONTAL SEQUENCE NODES FLOW */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-white/10 overflow-x-auto custom-scrollbar">
-            <div className="flex items-center gap-3 min-w-max pb-1">
+          {/* Real-Time Horizontal Flow Graph */}
+          <div className="overflow-x-auto pb-2 custom-scrollbar">
+            <div className="flex items-center gap-3 min-w-max p-2">
               {activePipeline.nodes.map((node, index) => {
+                const isStarting = node.status === 'STARTING';
+                const isRunning = node.status === 'RUNNING';
                 const isPending = node.status === 'PENDING';
-                const isStarting = node.status === 'STARTING' || node.status === 'STOPPING';
-                const isRunning = node.status === 'RUNNING' || node.status === 'STOPPED';
                 const isFailed = node.status === 'FAILED' || node.status === 'WARNING';
 
                 return (
                   <React.Fragment key={node.key}>
-                    <div className={`p-3.5 rounded-xl border flex flex-col items-center min-w-[140px] text-center transition-all duration-300 ${
-                      isStarting
-                        ? 'bg-indigo-950/70 border-indigo-400 shadow-lg shadow-indigo-500/30 ring-2 ring-indigo-400/50 scale-105'
-                        : isRunning
-                        ? 'bg-emerald-950/30 border-emerald-500/50 shadow-sm shadow-emerald-500/10'
-                        : isFailed
-                        ? 'bg-rose-950/40 border-rose-500/60'
-                        : 'bg-slate-950/60 border-white/10 opacity-50'
+                    <div className={`p-3.5 rounded-xl border flex flex-col items-center justify-center min-w-[130px] transition-all duration-300 text-center ${
+                      isStarting ? 'bg-indigo-950/80 border-indigo-500 shadow-lg shadow-indigo-500/30 scale-105 animate-pulse ring-2 ring-indigo-400' :
+                      isRunning ? 'bg-slate-900/90 border-emerald-500/60 shadow-md shadow-emerald-500/10' :
+                      isFailed ? 'bg-rose-950/60 border-rose-500/60' :
+                      'bg-slate-900/40 border-white/5 opacity-60'
                     }`}>
                       
-                      <div className="relative">
-                        <span className="text-2xl">{node.icon}</span>
-                        {isStarting && (
-                          <span className="absolute -top-1 -right-2 flex h-3 w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
-                          </span>
-                        )}
+                      <div className="text-2xl mb-1 flex items-center justify-center">
+                        {node.icon}
                       </div>
 
                       <div className="font-extrabold text-xs text-white mt-1 line-clamp-1">{node.name}</div>
                       <div className="text-[10px] font-mono text-slate-400">{node.compose_service}</div>
-
-                      {/* Dynamic Status Icon & Badge */}
-                      <div className="mt-2.5">
-                        {isStarting && (
-                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-bold flex items-center gap-1">
-                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                            Starting...
-                          </span>
-                        )}
-                        {isRunning && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1">
-                            <CheckCircle2 className="w-2.5 h-2.5" />
-                            Ready
-                          </span>
-                        )}
-                        {isPending && (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/5 text-[10px] font-medium flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" />
-                            Pending
-                          </span>
-                        )}
-                        {isFailed && (
-                          <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold flex items-center gap-1">
-                            <AlertCircle className="w-2.5 h-2.5" />
-                            Warning
-                          </span>
-                        )}
-                      </div>
-
                     </div>
 
                     {index < activePipeline.nodes.length - 1 && (
@@ -368,9 +364,17 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
               Production-ready distributed architecture presets with exact pod configurations, dependency topological graphs, and Spark engine tuning specs.
             </p>
           </div>
-          <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 self-start sm:self-auto">
-            {Object.keys(presets).length} Validated Architecture Profiles
-          </span>
+          <div className="flex items-center gap-2">
+            {lastInitiatedPreset && (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                Active: {lastInitiatedPreset}
+              </span>
+            )}
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 self-start sm:self-auto">
+              {Object.keys(presets).length} Validated Profiles
+            </span>
+          </div>
         </div>
 
         {/* Profiles Grid */}
@@ -378,6 +382,7 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
           {Object.keys(presets).map((pName) => {
             const p = presets[pName];
             const isSelected = selectedPreset === pName;
+            const isLastInitiated = lastInitiatedPreset === pName;
             const targetServices = p.services || [];
             
             // Calculate live running stats for this preset
@@ -396,6 +401,8 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                 className={`cursor-pointer rounded-2xl p-4 transition-all duration-200 border flex flex-col justify-between relative overflow-hidden ${
                   isSelected
                     ? 'bg-gradient-to-b from-indigo-950/80 to-slate-900/90 border-indigo-500 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/40'
+                    : isLastInitiated
+                    ? 'bg-slate-900/80 border-amber-500/40 shadow-lg shadow-amber-500/5'
                     : 'bg-slate-900/50 border-white/[0.08] hover:border-white/20 hover:bg-slate-900/80'
                 }`}
               >
@@ -405,28 +412,38 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
 
                 <div>
                   {/* Category & Status Header */}
-                  <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-white/10">
                       {p.category || 'Architecture Profile'}
                     </span>
 
-                    {/* Live Running Badge */}
-                    {isFullyRunning ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        {runningCount}/{totalCount} Active
-                      </span>
-                    ) : isPartiallyRunning ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                        {runningCount}/{totalCount} Partial
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-white/5 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                        0/{totalCount} Offline
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {/* Last Initiated Badge */}
+                      {isLastInitiated && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-indigo-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1 shadow-sm shadow-amber-500/10">
+                          <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                          LAST INITIATED
+                        </span>
+                      )}
+
+                      {/* Live Running Badge */}
+                      {isFullyRunning ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          {runningCount}/{totalCount} Active
+                        </span>
+                      ) : isPartiallyRunning ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                          {runningCount}/{totalCount} Partial
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-white/5 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                          0/{totalCount} Offline
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Profile Title & Description */}
@@ -439,22 +456,30 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                 </div>
 
                 {/* Resource Footprint Footer */}
-                <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sky-400 font-bold flex items-center gap-1">
-                      <HardDrive className="w-3 h-3 text-sky-400" />
-                      {p.est_ram}
-                    </span>
-                    {p.est_cores && (
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <Cpu className="w-3 h-3 text-indigo-400" />
-                        {p.est_cores}
+                <div className="mt-4 pt-3 border-t border-white/5">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sky-400 font-bold flex items-center gap-1">
+                        <HardDrive className="w-3 h-3 text-sky-400" />
+                        {p.est_ram}
                       </span>
-                    )}
+                      {p.est_cores && (
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <Cpu className="w-3 h-3 text-indigo-400" />
+                          {p.est_cores}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-indigo-300 font-bold flex items-center gap-1">
+                      {targetServices.length} Pods
+                    </span>
                   </div>
-                  <span className="text-xs text-indigo-300 font-bold flex items-center gap-1">
-                    {targetServices.length} Pods
-                  </span>
+                  {isLastInitiated && lastInitiatedTime && (
+                    <div className="mt-1.5 text-[10px] font-mono text-amber-400/90 flex items-center gap-1">
+                      <Clock className="w-2.5 h-2.5 text-amber-400" />
+                      <span>Initiated at {lastInitiatedTime}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -480,10 +505,31 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
                   {presetObj.est_ram}
                 </span>
+                {selectedPreset === lastInitiatedPreset && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-indigo-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    Active Initiated Session
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-300 mt-1">
                 {presetObj.desc}
               </p>
+              {lastInitiatedPreset && (
+                <div className="mt-2 text-xs flex items-center gap-2">
+                  {selectedPreset === lastInitiatedPreset ? (
+                    <span className="text-amber-300/90 font-medium flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      This workload profile was initiated on <strong>{lastInitiatedTime}</strong>.
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-slate-500" />
+                      Previewing profile • Last launched was <strong className="text-white font-semibold">{lastInitiatedPreset}</strong> ({lastInitiatedTime}).
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Launch & Stop Action Buttons */}
