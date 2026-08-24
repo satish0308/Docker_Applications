@@ -401,8 +401,8 @@ def inspect_single_service(key: str, meta: Dict[str, Any], client: Optional[dock
                     if h_info == "unhealthy":
                         status_label = "UNHEALTHY"
 
-                # Check port responsiveness directly using container IP to avoid DNS timeouts
-                target_port = meta.get("web_port") or meta.get("port")
+                # Check port responsiveness directly using container IP and internal listening port
+                target_port = meta.get("port")
                 if target_port and isinstance(target_port, int) and health_stat != "UNHEALTHY":
                     c_nets = matched_container.attrs.get("NetworkSettings", {}).get("Networks", {})
                     ip_addr = next((n.get("IPAddress") for n in c_nets.values() if n.get("IPAddress")), None)
@@ -410,7 +410,7 @@ def inspect_single_service(key: str, meta: Dict[str, Any], client: Optional[dock
 
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(0.15) # 150ms max
+                        s.settimeout(0.2) # 200ms max
                         s.connect((check_target, target_port))
                         s.close()
                         if health_stat == "N/A":
