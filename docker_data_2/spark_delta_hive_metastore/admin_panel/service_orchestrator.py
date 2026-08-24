@@ -65,6 +65,7 @@ COMPOSE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
         "desc": "REST API service for submitting interactive Spark jobs from Hue & Jupyter.",
         "est_ram": "1.0 GB",
         "internal_port": 8998,
+        "dependencies": ["spark", "spark-worker"]
     },
     "hive": {
         "name": "HiveServer2 & Metastore",
@@ -123,6 +124,7 @@ COMPOSE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
         "desc": "Executive Web SQL studio for querying Hive, Delta Lake, and SparkSQL.",
         "est_ram": "1.5 GB",
         "internal_port": 8888,
+        "dependencies": ["hive", "livy", "spark", "spark-worker", "postgres", "namenode", "datanode"]
     },
     "jupyter": {
         "name": "JupyterLab Data Science",
@@ -132,6 +134,7 @@ COMPOSE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
         "est_ram": "1.0 GB",
         "internal_port": 8888,
         "primary_web_port": 8889,
+        "dependencies": ["spark", "spark-worker", "minio", "namenode", "datanode"]
     },
     "pgadmin": {
         "name": "pgAdmin 4 Console",
@@ -249,7 +252,9 @@ def load_service_registry_from_compose() -> Dict[str, Dict[str, Any]]:
         elif isinstance(raw_deps, list):
             deps = [d if isinstance(d, str) else list(d.keys())[0] for d in raw_deps]
         else:
-            deps = descriptor.get("dependencies", [])
+            deps = []
+
+        combined_deps = list(dict.fromkeys(deps + descriptor.get("dependencies", [])))
 
         registry[key] = {
             "key": key,
@@ -266,7 +271,7 @@ def load_service_registry_from_compose() -> Dict[str, Dict[str, Any]]:
             "ports_mapped": [pm.get("raw", "") for pm in port_mappings] if port_mappings else [f"{web_port}:{internal_port}"],
             "desc": descriptor["desc"],
             "est_ram": descriptor["est_ram"],
-            "dependencies": deps
+            "dependencies": combined_deps
         }
 
     return registry
