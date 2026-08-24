@@ -78,18 +78,31 @@ async def websocket_container_logs(websocket: WebSocket, container_name: str):
     await websocket.accept()
     try:
         client = docker.from_env()
-        # Resolve container by exact name or substring matching
+        from service_orchestrator import SERVICE_REGISTRY, find_matching_container
+
         container = None
-        try:
-            container = client.containers.get(container_name)
-        except Exception:
-            for c in client.containers.list(all=True):
-                if container_name.lower() in c.name.lower():
-                    container = c
+        # First check if container_name matches a SERVICE_REGISTRY key or compose service
+        for k, meta in SERVICE_REGISTRY.items():
+            if k == container_name or meta.get("container") == container_name or meta.get("compose_service") == container_name:
+                container = find_matching_container(client, meta)
+                if container:
                     break
+
+        if not container:
+            try:
+                container = client.containers.get(container_name)
+            except Exception:
+                for c in client.containers.list(all=True):
+                    if container_name.lower() in c.name.lower():
+                        container = c
+                        break
         
         if not container:
-            await websocket.send_text(f"⚠️ Container '{container_name}' not found on host.\n")
+            await websocket.send_text(
+                f"⚠️ Container '{container_name}' has not been created or launched yet.\n"
+                f"💡 Status: Pod is currently STOPPED / OFFLINE.\n"
+                f"🚀 To view logs, launch this pod from the Pod Orchestrator tab or select an active running pod above.\n"
+            )
             await websocket.close()
             return
 
