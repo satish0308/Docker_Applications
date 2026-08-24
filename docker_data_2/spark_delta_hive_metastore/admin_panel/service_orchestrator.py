@@ -204,37 +204,91 @@ SERVICE_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 # -------------------------------------------------------------
-# OPERATIONAL PRESETS
+# OPERATIONAL PRESETS & WORKLOAD PROFILES
 # -------------------------------------------------------------
 OPERATIONAL_PRESETS: Dict[str, Dict[str, Any]] = {
     "⚡ Spark Minimalist / PySpark Core": {
         "desc": "Minimal lightweight cluster for batch PySpark, Delta Lake, and CLI scripts.",
+        "category": "Batch ETL & Data Processing",
         "est_ram": "~4.5 GB RAM",
+        "est_cores": "4 Cores",
+        "spark_spec": {
+            "driver_memory": "2g",
+            "executor_memory": "2g",
+            "executor_cores": 2,
+            "shuffle_partitions": 32,
+            "allocation": "Standalone Static"
+        },
         "services": ["postgres", "namenode", "datanode", "spark", "spark-worker"]
     },
     "🎨 Hue Analytics Studio Profile": {
         "desc": "Full SQL querying platform with Hue Web Studio, Hive Metastore, Livy, and Spark.",
+        "category": "Interactive SQL & Ad-hoc Analytics",
         "est_ram": "~9.5 GB RAM",
+        "est_cores": "6 Cores",
+        "spark_spec": {
+            "driver_memory": "3g",
+            "executor_memory": "4g",
+            "executor_cores": 2,
+            "shuffle_partitions": 64,
+            "allocation": "Dynamic Resource Allocation (DRA)"
+        },
         "services": ["postgres", "namenode", "datanode", "hive", "spark", "spark-worker", "livy", "hue"]
     },
     "📓 Data Science & Lakehouse (Jupyter + MinIO)": {
         "desc": "Interactive notebooks and S3 object storage for Lakehouse data science pipelines.",
+        "category": "Data Science, ML & Lakehouse",
         "est_ram": "~7.0 GB RAM",
+        "est_cores": "6 Cores",
+        "spark_spec": {
+            "driver_memory": "3g",
+            "executor_memory": "4g",
+            "executor_cores": 2,
+            "shuffle_partitions": 64,
+            "allocation": "Dynamic Resource Allocation (DRA)"
+        },
         "services": ["postgres", "namenode", "datanode", "keycloak", "minio", "spark", "spark-worker", "jupyter"]
     },
     "🐘 YARN MapReduce & Batch Studio": {
         "desc": "Full Hadoop YARN MapReduce execution tier for large-scale distributed batch computing.",
+        "category": "Hadoop YARN Distributed Computing",
         "est_ram": "~8.0 GB RAM",
+        "est_cores": "8 Cores",
+        "spark_spec": {
+            "driver_memory": "4g",
+            "executor_memory": "6g",
+            "executor_cores": 4,
+            "shuffle_partitions": 128,
+            "allocation": "YARN Dynamic Allocation (20GB Pool)"
+        },
         "services": ["postgres", "namenode", "datanode", "resourcemanager", "nodemanager", "hive"]
     },
     "📊 Spark Thrift BI Gateway Profile": {
         "desc": "Dedicated JDBC/ODBC endpoint for Tableau, PowerBI, DBeaver, and Superset.",
+        "category": "Enterprise BI & JDBC/ODBC Gateway",
         "est_ram": "~6.0 GB RAM",
+        "est_cores": "6 Cores",
+        "spark_spec": {
+            "driver_memory": "3g",
+            "executor_memory": "4g",
+            "executor_cores": 2,
+            "shuffle_partitions": 64,
+            "allocation": "Dynamic Resource Allocation (DRA)"
+        },
         "services": ["postgres", "namenode", "datanode", "spark", "spark-worker", "spark-thriftserver"]
     },
     "🚀 Full Enterprise BDP Suite": {
         "desc": "All 15 distributed platform containers started in strict dependency order.",
+        "category": "Full Platform Master Topology",
         "est_ram": "~16.0 GB RAM",
+        "est_cores": "12 Cores",
+        "spark_spec": {
+            "driver_memory": "4g",
+            "executor_memory": "8g",
+            "executor_cores": 4,
+            "shuffle_partitions": 200,
+            "allocation": "DRA Enterprise Concurrency"
+        },
         "services": list(SERVICE_REGISTRY.keys())
     }
 }

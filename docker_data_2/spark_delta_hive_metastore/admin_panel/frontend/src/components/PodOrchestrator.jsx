@@ -356,73 +356,288 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
         </div>
       )}
 
-      {/* SECTION 1: 1-CLICK OPERATIONAL PRESETS */}
-      <div className="glass-card p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold tracking-wide uppercase text-indigo-400 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-amber-400" />
-            1. 1-Click Operational Profiles
-          </h3>
-          <span className="text-xs text-slate-400">Pre-validated production workload presets</span>
+      {/* SECTION 1: 1-CLICK OPERATIONAL PRESETS & POD CONFIGURATIONS */}
+      <div className="glass-card p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-4">
+          <div>
+            <h3 className="text-base font-extrabold tracking-wide text-white flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+              1. 1-Click Operational Workload Profiles
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Production-ready distributed architecture presets with exact pod configurations, dependency topological graphs, and Spark engine tuning specs.
+            </p>
+          </div>
+          <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 self-start sm:self-auto">
+            {Object.keys(presets).length} Validated Architecture Profiles
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        {/* Profiles Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {Object.keys(presets).map((pName) => {
+            const p = presets[pName];
             const isSelected = selectedPreset === pName;
+            const targetServices = p.services || [];
+            
+            // Calculate live running stats for this preset
+            const runningCount = targetServices.filter(k => {
+              const svc = services.find(s => s.key === k || s.compose_service === k);
+              return svc && svc.is_running;
+            }).length;
+            const totalCount = targetServices.length;
+            const isFullyRunning = runningCount === totalCount && totalCount > 0;
+            const isPartiallyRunning = runningCount > 0 && !isFullyRunning;
+
             return (
-              <button
+              <div
                 key={pName}
                 onClick={() => setSelectedPreset(pName)}
-                className={`p-3.5 rounded-xl text-left transition-all border ${
+                className={`cursor-pointer rounded-2xl p-4 transition-all duration-200 border flex flex-col justify-between relative overflow-hidden ${
                   isSelected
-                    ? 'bg-indigo-600/20 border-indigo-500 shadow-md shadow-indigo-500/10'
-                    : 'bg-slate-900/60 border-white/[0.08] hover:border-white/20 hover:bg-slate-800/40'
+                    ? 'bg-gradient-to-b from-indigo-950/80 to-slate-900/90 border-indigo-500 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/40'
+                    : 'bg-slate-900/50 border-white/[0.08] hover:border-white/20 hover:bg-slate-900/80'
                 }`}
               >
-                <div className="font-bold text-xs text-white line-clamp-1">{pName}</div>
-                <div className="text-[10px] text-slate-400 mt-1 line-clamp-2">{presets[pName].desc}</div>
-                <div className="text-[10px] font-mono text-sky-400 font-bold mt-2">{presets[pName].est_ram}</div>
-              </button>
+                {isSelected && (
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+                )}
+
+                <div>
+                  {/* Category & Status Header */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-white/10">
+                      {p.category || 'Architecture Profile'}
+                    </span>
+
+                    {/* Live Running Badge */}
+                    {isFullyRunning ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        {runningCount}/{totalCount} Active
+                      </span>
+                    ) : isPartiallyRunning ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        {runningCount}/{totalCount} Partial
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-white/5 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                        0/{totalCount} Offline
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Profile Title & Description */}
+                  <h4 className="font-extrabold text-sm text-white tracking-tight leading-snug">
+                    {pName}
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+                    {p.desc}
+                  </p>
+                </div>
+
+                {/* Resource Footprint Footer */}
+                <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sky-400 font-bold flex items-center gap-1">
+                      <HardDrive className="w-3 h-3 text-sky-400" />
+                      {p.est_ram}
+                    </span>
+                    {p.est_cores && (
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Cpu className="w-3 h-3 text-indigo-400" />
+                        {p.est_cores}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-indigo-300 font-bold flex items-center gap-1">
+                    {targetServices.length} Pods
+                  </span>
+                </div>
+              </div>
             );
           })}
         </div>
 
-        {/* Selected Preset Action Strip */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div>
-            <div className="text-xs font-bold text-white flex items-center gap-2">
-              <span>{selectedPreset}</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono">
-                {presetObj.services?.length || 0} Pods
-              </span>
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 flex-wrap">
-              <span className="text-slate-500">Startup DAG Chain:</span>
-              {presetObj.services?.map((s, i) => (
-                <span key={s} className="flex items-center gap-1">
-                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">{s}</span>
-                  {i < presetObj.services.length - 1 && <ArrowRight className="w-3 h-3 text-slate-600" />}
+        {/* COMPREHENSIVE SELECTED PROFILE DETAILS & POD CONFIGURATIONS PANEL */}
+        <div className="rounded-2xl bg-slate-950/90 border border-indigo-500/40 p-5 space-y-5 shadow-2xl shadow-indigo-500/5">
+          
+          {/* Header Action Bar */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/10">
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h4 className="font-black text-base text-white tracking-tight">
+                  {selectedPreset}
+                </h4>
+                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  {presetObj.category || 'Architecture Profile'}
                 </span>
-              ))}
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                  {presetObj.services?.length || 0} Pods Total
+                </span>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                  {presetObj.est_ram}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                {presetObj.desc}
+              </p>
+            </div>
+
+            {/* Launch & Stop Action Buttons */}
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <button
+                onClick={() => handleStartPreset(selectedPreset)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white font-black text-xs shadow-xl shadow-indigo-500/25 flex items-center gap-2 transition active:scale-95"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Launch Profile Fleet
+              </button>
+              <button
+                onClick={() => handleStopPreset(selectedPreset)}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-rose-950/40 border border-white/10 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 font-bold text-xs flex items-center gap-2 transition active:scale-95"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                Stop Profile Fleet
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={() => handleStartPreset(selectedPreset)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              Launch Profile Fleet
-            </button>
-            <button
-              onClick={() => handleStopPreset(selectedPreset)}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/40 border border-white/10 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 font-semibold text-xs flex items-center gap-2 transition"
-            >
-              <Square className="w-3.5 h-3.5 fill-current" />
-              Stop Profile Fleet
-            </button>
+          {/* Spark Engine Tuning Spec (if configured for profile) */}
+          {presetObj.spark_spec && (
+            <div className="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/20">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 mb-2 flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+                Spark Compute Engine Specs & Allocation Profile
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 font-mono text-xs">
+                <div className="bg-slate-900/80 p-2 rounded-lg border border-white/5">
+                  <div className="text-[10px] text-slate-400 uppercase">Driver Memory</div>
+                  <div className="font-bold text-white mt-0.5">{presetObj.spark_spec.driver_memory}</div>
+                </div>
+                <div className="bg-slate-900/80 p-2 rounded-lg border border-white/5">
+                  <div className="text-[10px] text-slate-400 uppercase">Executor Memory</div>
+                  <div className="font-bold text-white mt-0.5">{presetObj.spark_spec.executor_memory}</div>
+                </div>
+                <div className="bg-slate-900/80 p-2 rounded-lg border border-white/5">
+                  <div className="text-[10px] text-slate-400 uppercase">Executor Cores</div>
+                  <div className="font-bold text-white mt-0.5">{presetObj.spark_spec.executor_cores} Cores</div>
+                </div>
+                <div className="bg-slate-900/80 p-2 rounded-lg border border-white/5">
+                  <div className="text-[10px] text-slate-400 uppercase">Shuffle Partitions</div>
+                  <div className="font-bold text-white mt-0.5">{presetObj.spark_spec.shuffle_partitions}</div>
+                </div>
+                <div className="bg-slate-900/80 p-2 rounded-lg border border-white/5 col-span-2 sm:col-span-1">
+                  <div className="text-[10px] text-slate-400 uppercase">Allocation Mode</div>
+                  <div className="font-bold text-emerald-400 mt-0.5 truncate">{presetObj.spark_spec.allocation}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Pod Configurations Grid */}
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                Pod Configuration Specifications & Endpoints
+              </span>
+              <span className="text-[11px] font-mono text-slate-400">
+                Topological Startup Sequence
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              {presetObj.services?.map((svcKey, index) => {
+                const liveSvc = services.find(s => s.key === svcKey || s.compose_service === svcKey);
+                const svcName = liveSvc?.name || svcKey;
+                const icon = liveSvc?.icon || "📦";
+                const tier = liveSvc?.tier || "Platform Service";
+                const isRunning = liveSvc?.is_running;
+                const containerName = liveSvc?.container || svcKey;
+                const port = liveSvc?.port || "N/A";
+                const estRam = liveSvc?.est_ram || "512 MB";
+                const desc = liveSvc?.desc || "";
+
+                return (
+                  <div
+                    key={svcKey}
+                    className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
+                      isRunning
+                        ? 'bg-slate-900/80 border-emerald-500/30 shadow-md shadow-emerald-500/5'
+                        : 'bg-slate-900/40 border-white/5'
+                    }`}
+                  >
+                    <div>
+                      {/* Step Header & Live Status */}
+                      <div className="flex items-center justify-between gap-1 mb-2">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300">
+                          Step #{index + 1}
+                        </span>
+                        {isRunning ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            Running
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/10 text-[10px] font-medium flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                            Stopped
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Pod Name & Icon */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{icon}</span>
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-xs text-white truncate">{svcName}</h5>
+                          <div className="text-[10px] font-mono text-slate-400 truncate">{containerName}</div>
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <p className="text-[11px] text-slate-300 mt-2 line-clamp-2 leading-relaxed">
+                        {desc}
+                      </p>
+                    </div>
+
+                    {/* Spec Footer */}
+                    <div className="mt-3 pt-2.5 border-t border-white/5 grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-300">
+                      <div>
+                        <span className="text-slate-500 block">Est. RAM:</span>
+                        <span className="font-bold text-sky-400">{estRam}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">Port / Host:</span>
+                        <span className="font-bold text-indigo-300">{port}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+
+          {/* Startup Topological Chain Visualization */}
+          <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/10 flex items-center gap-2 flex-wrap text-xs">
+            <span className="font-bold text-slate-400 uppercase text-[10px] mr-1">
+              Topological DAG Sequence:
+            </span>
+            {presetObj.services?.map((s, i) => (
+              <div key={s} className="flex items-center gap-1.5">
+                <span className="px-2 py-1 rounded-lg bg-slate-800 border border-white/10 text-white font-mono text-[11px] font-semibold">
+                  {s}
+                </span>
+                {i < (presetObj.services?.length || 0) - 1 && (
+                  <ArrowRight className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                )}
+              </div>
+            ))}
+          </div>
+
         </div>
       </div>
 
