@@ -69,6 +69,8 @@ services:
     ports:
       - "9864:9864"
       - "2223:22"
+    depends_on:
+      - namenode
     networks:
       - hadoop-network
 
@@ -133,6 +135,8 @@ services:
     depends_on:
       hive:
         condition: service_healthy
+      livy:
+        condition: service_started
     networks:
       - hadoop-network
 
@@ -312,6 +316,7 @@ services:
       - "4040-4045:4040-4045"
     depends_on:
       - spark
+      - spark-worker
     networks:
       - hadoop-network
 
