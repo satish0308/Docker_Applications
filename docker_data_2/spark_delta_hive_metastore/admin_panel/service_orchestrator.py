@@ -425,7 +425,8 @@ def get_compose_base_cmd() -> List[str]:
 
 def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
     """
-    Starts a list of services in topological dependency order and validates readiness.
+    Starts a list of services in topological dependency order using existing containers.
+    Auto-heals stale docker networks without attempting to create duplicate pods.
     """
     resolved_order = resolve_dependencies(services)
     results = []
@@ -433,6 +434,16 @@ def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
         client = docker.from_env()
     except Exception as ex:
         return [{"service": s, "status": "FAILED", "msg": f"Docker connection error: {ex}"} for s in resolved_order]
+
+    # Find the primary active hadoop network
+    active_network = None
+    try:
+        for net in client.networks.list():
+            if net.name in ["hadoop-network", "spark_delta_hive_metastore_hadoop-network", "database-net"]:
+                active_network = net
+                break
+    except Exception:
+        pass
 
     for svc_key in resolved_order:
         meta = SERVICE_REGISTRY.get(svc_key)
@@ -445,23 +456,74 @@ def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
         # 1. Check if container already exists and start it
         matched = find_matching_container(client, meta)
         if matched:
+            # Refresh status
+            try:
+                matched.reload()
+            except Exception:
+                pass
+
             if matched.status.lower() == "running":
                 res_info["status"] = "RUNNING"
                 res_info["msg"] = "Already running."
                 results.append(res_info)
                 continue
-            else:
-                try:
-                    matched.start()
-                    res_info["status"] = "STARTED"
-                    res_info["msg"] = "Container started successfully."
-                    results.append(res_info)
-                    time.sleep(1)
-                    continue
-                except Exception as start_ex:
-                    res_info["msg"] = f"Direct start error: {start_ex}. Attempting compose..."
 
-        # 2. Fallback: docker compose up -d --no-deps
+            # Attempt direct container start with automatic network healing
+            try:
+                matched.start()
+                res_info["status"] = "STARTED"
+                res_info["msg"] = f"Container '{matched.name}' started successfully."
+                results.append(res_info)
+                time.sleep(0.8)
+                continue
+            except Exception as start_ex:
+                err_str = str(start_ex)
+                # If network was recreated or missing, auto-heal connection
+                if "network" in err_str.lower():
+                    try:
+                        if active_network:
+                            try:
+                                active_network.connect(matched)
+                            except Exception:
+                                pass
+                        # Also attempt CLI network connect fallback
+                        subprocess.run(["docker", "network", "connect", "hadoop-network", matched.name], capture_output=True)
+                        matched.start()
+                        res_info["status"] = "STARTED"
+                        res_info["msg"] = f"Auto-healed network and started '{matched.name}'."
+                        results.append(res_info)
+                        time.sleep(0.8)
+                        continue
+                    except Exception as heal_ex:
+                        # Try via CLI docker start
+                        proc = subprocess.run(["docker", "start", matched.name], capture_output=True, text=True)
+                        if proc.returncode == 0:
+                            res_info["status"] = "STARTED"
+                            res_info["msg"] = f"Started '{matched.name}' via Docker CLI."
+                            results.append(res_info)
+                            time.sleep(0.8)
+                            continue
+                        else:
+                            res_info["status"] = "FAILED"
+                            res_info["msg"] = f"Failed to start existing container: {proc.stderr.strip() or heal_ex}"
+                            results.append(res_info)
+                            continue
+                else:
+                    # Non-network error on direct start; try docker start CLI before compose
+                    proc = subprocess.run(["docker", "start", matched.name], capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        res_info["status"] = "STARTED"
+                        res_info["msg"] = f"Started '{matched.name}'."
+                        results.append(res_info)
+                        time.sleep(0.8)
+                        continue
+                    else:
+                        res_info["status"] = "FAILED"
+                        res_info["msg"] = proc.stderr.strip() or str(start_ex)
+                        results.append(res_info)
+                        continue
+
+        # 2. Only if container does NOT exist at all, create via docker compose
         try:
             compose_cmd = get_compose_base_cmd() + ["up", "-d", "--no-deps", comp_name]
             proc = subprocess.run(
@@ -472,16 +534,28 @@ def start_services_sequential(services: List[str]) -> List[Dict[str, Any]]:
             )
             if proc.returncode == 0:
                 res_info["status"] = "STARTED"
-                res_info["msg"] = "Started via Docker Compose."
+                res_info["msg"] = "Created and started via Docker Compose."
             else:
-                res_info["status"] = "WARNING"
-                res_info["msg"] = proc.stderr.strip() or proc.stdout.strip()
+                # If conflict occurred, resolve by starting existing container
+                err_msg = proc.stderr.strip() or proc.stdout.strip()
+                if "Conflict" in err_msg or "already in use" in err_msg:
+                    target_cname = meta.get("container", comp_name)
+                    c_proc = subprocess.run(["docker", "start", target_cname], capture_output=True, text=True)
+                    if c_proc.returncode == 0:
+                        res_info["status"] = "STARTED"
+                        res_info["msg"] = f"Reconnected and started existing container '{target_cname}'."
+                    else:
+                        res_info["status"] = "WARNING"
+                        res_info["msg"] = c_proc.stderr.strip() or err_msg
+                else:
+                    res_info["status"] = "WARNING"
+                    res_info["msg"] = err_msg
         except Exception as ex:
             res_info["status"] = "FAILED"
             res_info["msg"] = str(ex)
 
         results.append(res_info)
-        time.sleep(1)
+        time.sleep(0.8)
 
     return results
 
