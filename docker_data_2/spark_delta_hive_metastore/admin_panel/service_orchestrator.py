@@ -10,198 +10,269 @@ import os
 import subprocess
 from typing import Dict, List, Set, Tuple, Any, Optional
 
+import yaml
+
 # -------------------------------------------------------------
-# SERVICE REGISTRY & METADATA
+# DOCKER COMPOSE CANONICAL SCHEMA LOADER
 # -------------------------------------------------------------
-SERVICE_REGISTRY: Dict[str, Dict[str, Any]] = {
+COMPOSE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
     "postgres": {
         "name": "PostgreSQL Metastore DB",
-        "container": "hive-metastore-postgres",
-        "compose_service": "postgres",
         "tier": "Foundation & Metadata",
         "icon": "🐘",
-        "port": 5432,
-        "host": "postgres",
         "desc": "Relational backend for Hive Metastore, Hue UI, and Keycloak SSO.",
         "est_ram": "512 MB",
-        "dependencies": []
+        "internal_port": 5432,
     },
     "namenode": {
         "name": "HDFS NameNode",
-        "container": "namenode",
-        "compose_service": "namenode",
         "tier": "Foundation & Metadata",
         "icon": "📦",
-        "port": 9000,
-        "web_port": 9870,
-        "host": "namenode",
         "desc": "Hadoop Distributed File System Master and namespace coordinator.",
         "est_ram": "1.0 GB",
-        "dependencies": []
+        "internal_port": 9000,
+        "primary_web_port": 9870,
     },
     "datanode": {
         "name": "HDFS DataNode",
-        "container": "datanode",
-        "compose_service": "datanode",
         "tier": "Foundation & Metadata",
         "icon": "🗄️",
-        "port": 9864,
-        "host": "datanode",
         "desc": "HDFS block storage node for distributed delta files and datasets.",
         "est_ram": "1.0 GB",
-        "dependencies": ["namenode"]
+        "internal_port": 9864,
     },
     "spark": {
         "name": "Spark Master & History Server",
-        "container": "spark",
-        "compose_service": "spark",
         "tier": "Compute Engines",
         "icon": "⚡",
-        "port": 7077,
-        "web_port": 8089,
-        "history_port": 18080,
-        "host": "spark",
         "desc": "Apache Spark Master cluster manager, DAG scheduler, and History Server.",
         "est_ram": "2.0 GB",
-        "dependencies": ["postgres", "namenode", "datanode"]
+        "internal_port": 7077,
+        "history_port": 18080,
     },
     "spark-worker": {
         "name": "Spark Worker Fleet",
-        "container": "spark_delta_hive_metastore-spark-worker-1",
-        "compose_service": "spark-worker",
         "tier": "Compute Engines",
         "icon": "⚙️",
-        "port": 8081,
-        "host": "spark-worker",
         "desc": "Distributed Spark executors running compute tasks and memory caching.",
         "est_ram": "4.0 GB+",
-        "dependencies": ["spark"]
+        "internal_port": 8081,
     },
     "livy": {
         "name": "Apache Livy REST Server",
-        "container": "livy",
-        "compose_service": "livy",
         "tier": "Compute Engines",
         "icon": "🔌",
-        "port": 8998,
-        "host": "livy",
         "desc": "REST API service for submitting interactive Spark jobs from Hue & Jupyter.",
         "est_ram": "1.0 GB",
-        "dependencies": ["spark", "spark-worker"]
+        "internal_port": 8998,
     },
     "hive": {
         "name": "HiveServer2 & Metastore",
-        "container": "hive-server",
-        "compose_service": "hive",
         "tier": "Compute Engines",
         "icon": "🐝",
-        "port": 10000,
-        "host": "hive-server",
         "desc": "Hive query execution engine and Thrift metastore service.",
         "est_ram": "2.0 GB",
-        "dependencies": ["postgres", "namenode", "datanode"]
+        "internal_port": 10000,
+        "primary_web_port": 10004,
     },
     "spark-thriftserver": {
         "name": "Spark Thrift Server (BI Gateway)",
-        "container": "spark-thriftserver",
-        "compose_service": "spark-thriftserver",
         "tier": "Compute Engines",
         "icon": "📊",
-        "port": 10000,
-        "host": "spark-thriftserver",
         "desc": "JDBC/ODBC gateway for BI tools (PowerBI, Tableau, DBeaver) into Spark.",
         "est_ram": "2.0 GB",
-        "dependencies": ["spark", "spark-worker", "postgres", "namenode"]
+        "internal_port": 10000,
     },
     "resourcemanager": {
         "name": "YARN ResourceManager",
-        "container": "resourcemanager",
-        "compose_service": "resourcemanager",
         "tier": "Compute Engines",
         "icon": "🐘",
-        "port": 8088,
-        "host": "resourcemanager",
         "desc": "YARN cluster scheduler and application lifecycle coordinator.",
         "est_ram": "1.5 GB",
-        "dependencies": ["namenode", "datanode"]
+        "internal_port": 8088,
     },
     "nodemanager": {
         "name": "YARN NodeManager",
-        "container": "nodemanager",
-        "compose_service": "nodemanager",
         "tier": "Compute Engines",
         "icon": "⚙️",
-        "port": 8042,
-        "host": "nodemanager",
         "desc": "YARN container execution daemon managing 20GB memory pool.",
         "est_ram": "2.0 GB+",
-        "dependencies": ["resourcemanager"]
+        "internal_port": 8042,
     },
     "keycloak": {
         "name": "Keycloak IAM & SSO",
-        "container": "keycloak",
-        "compose_service": "keycloak",
         "tier": "Security & Management",
         "icon": "🔐",
-        "port": 8080,
-        "host": "keycloak",
         "desc": "OpenID Connect / OAuth2 identity broker for MinIO and enterprise access.",
         "est_ram": "1.0 GB",
-        "dependencies": ["postgres"]
+        "internal_port": 8080,
     },
     "minio": {
         "name": "MinIO S3 Object Store",
-        "container": "minio",
-        "compose_service": "minio",
         "tier": "Foundation & Metadata",
         "icon": "🪣",
-        "port": 9000,
-        "web_port": 9001,
-        "host": "minio",
         "desc": "S3-compatible high-performance object storage for delta tables and lakehouse.",
         "est_ram": "512 MB",
-        "dependencies": ["keycloak"]
+        "internal_port": 9000,
+        "primary_web_port": 9001,
     },
     "hue": {
         "name": "Hue Analytics Studio",
-        "container": "hue",
-        "compose_service": "hue",
         "tier": "Interactive Studios",
         "icon": "🎨",
-        "port": 8888,
-        "web_port": 8888,
-        "host": "hue",
         "desc": "Executive Web SQL studio for querying Hive, Delta Lake, and SparkSQL.",
         "est_ram": "1.5 GB",
-        "dependencies": ["hive", "livy", "spark", "spark-worker", "postgres", "namenode", "datanode"]
+        "internal_port": 8888,
     },
     "jupyter": {
         "name": "JupyterLab Data Science",
-        "container": "jupyter-notebook",
-        "compose_service": "jupyter",
         "tier": "Interactive Studios",
         "icon": "📓",
-        "port": 8888,
-        "web_port": 8889,
-        "host": "jupyter-notebook",
         "desc": "Python/PySpark notebook workspace preconfigured with Delta Lake & S3.",
         "est_ram": "1.0 GB",
-        "dependencies": ["spark", "spark-worker", "minio", "namenode", "datanode"]
+        "internal_port": 8888,
+        "primary_web_port": 8889,
     },
     "pgadmin": {
         "name": "pgAdmin 4 Console",
-        "container": "pgadmin",
-        "compose_service": "pgadmin",
         "tier": "Security & Management",
         "icon": "🛠️",
-        "port": 80,
-        "web_port": 8081,
-        "host": "pgadmin",
         "desc": "Web-based graphical management interface for PostgreSQL metastore.",
         "est_ram": "300 MB",
-        "dependencies": ["postgres"]
-    }
+        "internal_port": 80,
+        "primary_web_port": 8081,
+    },
 }
+
+def find_docker_compose_path() -> Optional[str]:
+    """Locates the canonical docker-compose.yml file from workspace or container paths."""
+    candidate_paths = [
+        "/app/docker-compose.yml",
+        "/workspace/docker-compose.yml",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../docker-compose.yml")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../docker-compose.yml")),
+        "docker-compose.yml"
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+def load_service_registry_from_compose() -> Dict[str, Dict[str, Any]]:
+    """
+    Dynamically derives all hostnames, port mappings, container names, images,
+    and dependency topologies directly from docker-compose.yml.
+    """
+    compose_file = find_docker_compose_path()
+    compose_services = {}
+    if compose_file:
+        try:
+            with open(compose_file, "r") as f:
+                data = yaml.safe_load(f) or {}
+                compose_services = data.get("services", {})
+        except Exception as ex:
+            print(f"Warning: Failed to load docker-compose.yml: {ex}")
+
+    registry = {}
+    all_keys = list(dict.fromkeys(list(COMPOSE_DESCRIPTORS.keys()) + [k for k in compose_services.keys() if k != "admin-panel"]))
+
+    for key in all_keys:
+        svc_data = compose_services.get(key, {})
+        descriptor = COMPOSE_DESCRIPTORS.get(key, {
+            "name": key.capitalize(),
+            "tier": "Compute Engines",
+            "icon": "📦",
+            "desc": f"Distributed service {key}",
+            "est_ram": "1.0 GB",
+            "internal_port": None
+        })
+
+        # 1. Derive Container Name
+        cname = svc_data.get("container_name") or descriptor.get("container")
+        if not cname:
+            if key == "spark-worker":
+                cname = "spark_delta_hive_metastore-spark-worker-1"
+            else:
+                cname = key
+
+        # 2. Derive Hostname
+        hostname = svc_data.get("hostname") or descriptor.get("host") or cname or key
+
+        # 3. Derive Image Tag or Dockerfile
+        image_spec = svc_data.get("image")
+        if not image_spec:
+            build_info = svc_data.get("build")
+            if isinstance(build_info, dict):
+                image_spec = build_info.get("dockerfile", f"spark_delta_hive_metastore-{key}")
+            elif isinstance(build_info, str):
+                image_spec = f"spark_delta_hive_metastore-{key}"
+            else:
+                image_spec = f"spark_delta_hive_metastore-{key}:latest"
+
+        # 4. Derive Ports & Port Mappings
+        raw_ports = svc_data.get("ports", [])
+        port_mappings = []
+        host_port = None
+        container_port = None
+        history_port = descriptor.get("history_port")
+
+        for p in raw_ports:
+            p_str = str(p)
+            if ":" in p_str:
+                parts = p_str.split(":")
+                try:
+                    h_p = int(parts[0])
+                    c_p = int(parts[1])
+                    port_mappings.append({"host": h_p, "container": c_p, "raw": p_str})
+                    if h_p == 18080:
+                        history_port = 18080
+                    elif host_port is None:
+                        host_port = h_p
+                        container_port = c_p
+                except ValueError:
+                    port_mappings.append({"raw": p_str})
+            else:
+                try:
+                    c_p = int(p_str)
+                    port_mappings.append({"container": c_p, "raw": p_str})
+                except ValueError:
+                    pass
+
+        # Select primary web_port and internal listening port
+        internal_port = descriptor.get("internal_port") or container_port or host_port or 80
+        web_port = descriptor.get("primary_web_port") or host_port or internal_port
+
+        # 5. Derive Dependencies
+        raw_deps = svc_data.get("depends_on", [])
+        if isinstance(raw_deps, dict):
+            deps = list(raw_deps.keys())
+        elif isinstance(raw_deps, list):
+            deps = [d if isinstance(d, str) else list(d.keys())[0] for d in raw_deps]
+        else:
+            deps = descriptor.get("dependencies", [])
+
+        registry[key] = {
+            "key": key,
+            "name": descriptor["name"],
+            "tier": descriptor["tier"],
+            "icon": descriptor["icon"],
+            "compose_service": key,
+            "container": cname,
+            "host": hostname,
+            "image": image_spec,
+            "port": internal_port,
+            "web_port": web_port,
+            "history_port": history_port,
+            "ports_mapped": [pm.get("raw", "") for pm in port_mappings] if port_mappings else [f"{web_port}:{internal_port}"],
+            "desc": descriptor["desc"],
+            "est_ram": descriptor["est_ram"],
+            "dependencies": deps
+        }
+
+    return registry
+
+# Initialize canonical service registry from compose specification
+SERVICE_REGISTRY: Dict[str, Dict[str, Any]] = load_service_registry_from_compose()
 
 # -------------------------------------------------------------
 # OPERATIONAL PRESETS & WORKLOAD PROFILES
@@ -434,6 +505,9 @@ def inspect_single_service(key: str, meta: Dict[str, Any], client: Optional[dock
         "icon": meta["icon"],
         "compose_service": meta["compose_service"],
         "container": meta["container"],
+        "host": meta.get("host", meta["compose_service"]),
+        "image": meta.get("image", "N/A"),
+        "ports_mapped": meta.get("ports_mapped", []),
         "desc": meta["desc"],
         "est_ram": meta["est_ram"],
         "dependencies": meta["dependencies"],
@@ -447,16 +521,19 @@ def inspect_single_service(key: str, meta: Dict[str, Any], client: Optional[dock
 def get_service_status_matrix() -> List[Dict[str, Any]]:
     """
     Inspects all platform services concurrently via Docker Daemon and returns live status matrix in <50ms.
+    Dynamically syncs with docker-compose.yml on every inspection.
     """
     try:
         client = docker.from_env()
     except Exception:
         client = None
 
+    active_registry = load_service_registry_from_compose()
+
     import concurrent.futures
     matrix = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(inspect_single_service, k, meta, client): k for k, meta in SERVICE_REGISTRY.items()}
+        futures = {executor.submit(inspect_single_service, k, meta, client): k for k, meta in active_registry.items()}
         for future in concurrent.futures.as_completed(futures):
             try:
                 matrix.append(future.result())
@@ -464,7 +541,7 @@ def get_service_status_matrix() -> List[Dict[str, Any]]:
                 pass
 
     # Maintain original registry ordering
-    order_map = {k: idx for idx, k in enumerate(SERVICE_REGISTRY.keys())}
+    order_map = {k: idx for idx, k in enumerate(active_registry.keys())}
     matrix.sort(key=lambda x: order_map.get(x["key"], 999))
     return matrix
 

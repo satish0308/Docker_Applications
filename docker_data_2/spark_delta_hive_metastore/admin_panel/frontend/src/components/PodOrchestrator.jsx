@@ -638,14 +638,20 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                       {/* Pod Name & Icon */}
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{icon}</span>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <h5 className="font-extrabold text-xs text-white truncate">{svcName}</h5>
-                          <div className="text-[10px] font-mono text-slate-400 truncate">{containerName}</div>
+                          <div className="text-[10px] font-mono text-slate-400 truncate flex items-center justify-between gap-1">
+                            <span>{containerName}</span>
+                            <span className="text-indigo-400 font-bold truncate">{liveSvc?.host || svcKey}</span>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Description */}
-                      <p className="text-[11px] text-slate-300 mt-2 line-clamp-2 leading-relaxed">
+                      {/* Image & Description */}
+                      <div className="mt-2 text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-white/5 text-amber-300/90 truncate" title={`Docker Image / Dockerfile: ${liveSvc?.image || 'compose build'}`}>
+                        🐳 {liveSvc?.image || 'compose build'}
+                      </div>
+                      <p className="text-[11px] text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
                         {desc}
                       </p>
                     </div>
@@ -657,8 +663,10 @@ export default function PodOrchestrator({ services, presets, onRefresh }) {
                         <span className="font-bold text-sky-400">{estRam}</span>
                       </div>
                       <div>
-                        <span className="text-slate-500 block">Port / Host:</span>
-                        <span className="font-bold text-indigo-300">{port}</span>
+                        <span className="text-slate-500 block">Ports (Host : Pod):</span>
+                        <span className="font-bold text-indigo-300 truncate block" title={liveSvc?.ports_mapped?.join(', ') || String(port)}>
+                          {liveSvc?.ports_mapped?.length ? liveSvc.ports_mapped.join(', ') : port}
+                        </span>
                       </div>
                     </div>
                   </div>
