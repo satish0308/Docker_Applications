@@ -368,11 +368,9 @@ def find_matching_container(client: docker.DockerClient, meta: Dict[str, Any]):
             return cont
         if cname == meta["container"] or cname == meta["compose_service"]:
             return cont
-        if cname.endswith(f"-{meta['compose_service']}-1") or cname.endswith(f"_{meta['compose_service']}_1"):
+        if cname.endswith(f"-{meta['compose_service']}-1") or cname.endswith(f"_{meta['compose_service']}_1") or cname.endswith(f"-{meta['compose_service']}-2"):
             return cont
-        if cname.startswith(f"{meta['compose_service']}-"):
-            return cont
-        if meta["container"] in cname:
+        if cname.startswith(f"{meta['compose_service']}-") and not cname.startswith("spark-thriftserver"):
             return cont
     return None
 

@@ -64,16 +64,8 @@ def probe_cluster_diagnostics():
     for port_def in PORT_DEFINITIONS:
         key = port_def["key"]
         reg_meta = SERVICE_REGISTRY.get(key, {})
-        expected_container = (reg_meta.get("container") or port_def["host"]).lower()
-        
-        # Check if matching container is running
-        is_running = False
-        matched_c = None
-        for cname, cobj in running_container_names.items():
-            if expected_container in cname or (key in cname and "spark-worker" in key):
-                is_running = True
-                matched_c = cobj
-                break
+        matched_c = find_matching_container(client, reg_meta) if reg_meta else None
+        is_running = (matched_c.status.lower() == "running") if matched_c else False
 
         probe_item = {
             "service_key": key,
@@ -83,7 +75,7 @@ def probe_cluster_diagnostics():
             "tier": port_def["tier"],
             "desc": port_def["desc"],
             "is_enabled": is_running,
-            "container_name": matched_c.name if matched_c else expected_container,
+            "container_name": matched_c.name.lstrip("/") if matched_c else (reg_meta.get("container") or port_def["host"]),
             "status": "INACTIVE",
             "latency_ms": None,
             "error": None
@@ -93,9 +85,17 @@ def probe_cluster_diagnostics():
             # Active pod: probe network socket
             t0 = time.time()
             try:
-                # If checking worker, try its container IP or hostname
+                # If container is matched, try its direct IP on hadoop-network
                 target_host = port_def["host"]
-                s = socket.create_connection((target_host, port_def["port"]), timeout=2.5)
+                if matched_c:
+                    c_nets = matched_c.attrs.get("NetworkSettings", {}).get("Networks", {})
+                    ip_addr = next((n.get("IPAddress") for n in c_nets.values() if n.get("IPAddress")), None)
+                    if ip_addr:
+                        target_host = ip_addr
+
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(1.0)
+                s.connect((target_host, port_def["port"]))
                 s.close()
                 elapsed_ms = round((time.time() - t0) * 1000, 1)
                 
