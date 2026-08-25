@@ -670,6 +670,47 @@ export default function DataIngestion() {
                   </div>
                 </label>
               </div>
+
+              {previewLoading && (
+                <div className="p-4 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center gap-2 text-xs text-sky-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Inspecting file schema & inferring data types...</span>
+                </div>
+              )}
+
+              {schemaPreview && (
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-sky-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-sky-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" /> Schema & Data Preview ({schemaPreview.columns?.length || 0} columns)
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase">
+                      {schemaPreview.file_format || 'auto-detected'}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto max-h-48 border border-white/5 rounded-lg custom-scrollbar">
+                    <table className="w-full text-[11px] text-left">
+                      <thead className="bg-slate-900 text-slate-300 font-mono sticky top-0">
+                        <tr>
+                          {schemaPreview.columns?.map(col => (
+                            <th key={col} className="px-3 py-1.5 border-b border-white/10 font-semibold">{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 font-mono text-slate-300">
+                        {schemaPreview.preview_data?.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-white/5">
+                            {schemaPreview.columns?.map(col => (
+                              <td key={col} className="px-3 py-1 truncate max-w-[150px]">{String(row[col] ?? '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1157,7 +1198,7 @@ export default function DataIngestion() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="space-y-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase">Format:</label>
               <select
@@ -1192,6 +1233,19 @@ export default function DataIngestion() {
                 <option value="s3">🪣 MinIO (S3 Object)</option>
                 <option value="hdfs">📦 HDFS Warehouse</option>
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-400 uppercase">Chunk Size:</label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={chunkSize}
+                onChange={(e) => setChunkSize(e.target.value)}
+                placeholder="50"
+                className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
+              />
             </div>
           </div>
 
