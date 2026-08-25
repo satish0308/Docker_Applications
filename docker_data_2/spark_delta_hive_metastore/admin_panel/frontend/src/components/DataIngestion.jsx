@@ -757,7 +757,7 @@ export default function DataIngestion() {
                         <div className="relative">
                           <input
                             type="text"
-                            placeholder="AKIAIOSFODNN7EXAMPLE"
+                            placeholder="e.g. AWS_ACCESS_KEY_ID"
                             value={s3AccessKey}
                             onChange={(e) => setS3AccessKey(e.target.value)}
                             className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
@@ -772,7 +772,7 @@ export default function DataIngestion() {
                         <div className="relative">
                           <input
                             type={showSecretKey ? "text" : "password"}
-                            placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                            placeholder="e.g. AWS_SECRET_ACCESS_KEY"
                             value={s3SecretKey}
                             onChange={(e) => setS3SecretKey(e.target.value)}
                             className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500 pr-9"

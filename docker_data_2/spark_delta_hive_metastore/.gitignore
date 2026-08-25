@@ -58,6 +58,7 @@ spark_tuning_config.json
 *.key
 credentials.json
 aws_credentials.json
+scripts/bin/
 
 # IDE & OS files
 .idea/

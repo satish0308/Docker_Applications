@@ -43,8 +43,8 @@ def test_s3_test_connection_success(mock_get_client):
     mock_get_client.return_value = mock_s3
 
     resp = client.post("/api/ingestion/s3/test-connection", json={
-        "aws_access_key": "AKIAIOSFODNN7EXAMPLE",
-        "aws_secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "aws_access_key": "MOCK_AWS_ACCESS_KEY_ID_1234",
+        "aws_secret_key": "MOCK_AWS_SECRET_ACCESS_KEY_5678",
         "aws_region": "us-east-1"
     })
     assert resp.status_code == 200
@@ -79,8 +79,8 @@ def test_s3_browse_folders_and_files(mock_get_client):
     mock_get_client.return_value = mock_s3
 
     resp = client.post("/api/ingestion/s3/browse", json={
-        "aws_access_key": "AKIAIOSFODNN7EXAMPLE",
-        "aws_secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "aws_access_key": "MOCK_AWS_ACCESS_KEY_ID_1234",
+        "aws_secret_key": "MOCK_AWS_SECRET_ACCESS_KEY_5678",
         "aws_region": "us-east-1",
         "bucket": "sales-lake",
         "prefix": "sales/2026/"
@@ -102,8 +102,8 @@ def test_s3_submit_stream_job_construction(mock_get_client):
     mock_get_client.return_value = mock_s3
 
     resp = client.post("/api/ingestion/s3/submit-stream", json={
-        "aws_access_key": "AKIAIOSFODNN7EXAMPLE",
-        "aws_secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "aws_access_key": "MOCK_AWS_ACCESS_KEY_ID_1234",
+        "aws_secret_key": "MOCK_AWS_SECRET_ACCESS_KEY_5678",
         "aws_region": "us-east-1",
         "bucket": "sales-lake",
         "source_prefix": "sales/2026/",

@@ -1,0 +1,26 @@
+# Gitleaks Configuration for Big Data Platform
+title = "BDP Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for build artifacts, mock test fixtures, and safe placeholders"
+paths = [
+  '''^\.git/''',
+  '''^tests/.*''',
+  '''^postgres/data/.*''',
+  '''^hadoop/.*''',
+  '''^minio/data/.*''',
+  '''^backups/.*''',
+  '''^node_modules/.*''',
+  '''^admin_panel/frontend/dist/.*''',
+]
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+  '''minioadmin''',
+  '''minioadmin123''',
+  '''hivepassword''',
+  '''postgres''',
+]
