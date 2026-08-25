@@ -391,11 +391,25 @@ def list_backups():
                         "original_location": meta.get("original_location", "")
                     })
                 except Exception:
+                    inferred_db = "default"
+                    inferred_table = entry
+                    parts = entry.split("_")
+                    if is_db_backup:
+                        if len(parts) >= 4 and parts[0] == "db":
+                            inferred_db = "_".join(parts[3:])
+                        inferred_table = "Full Database"
+                    else:
+                        if len(parts) >= 5 and parts[0] == "backup":
+                            inferred_db = parts[3]
+                            inferred_table = "_".join(parts[4:])
+                        elif len(parts) >= 4 and parts[0] == "backup":
+                            inferred_table = "_".join(parts[3:])
+
                     backups.append({
                         "backup_id": entry,
                         "backup_type": "database" if is_db_backup else "table",
-                        "database_name": "default",
-                        "table_name": "Full Database" if is_db_backup else entry,
+                        "database_name": inferred_db,
+                        "table_name": inferred_table,
                         "timestamp": fallback_mtime,
                         "size": f"{fallback_size_mb} MB",
                         "total_rows": "N/A",
@@ -404,11 +418,25 @@ def list_backups():
                         "original_location": ""
                     })
             else:
+                inferred_db = "default"
+                inferred_table = entry
+                parts = entry.split("_")
+                if is_db_backup:
+                    if len(parts) >= 4 and parts[0] == "db":
+                        inferred_db = "_".join(parts[3:])
+                    inferred_table = "Full Database"
+                else:
+                    if len(parts) >= 5 and parts[0] == "backup":
+                        inferred_db = parts[3]
+                        inferred_table = "_".join(parts[4:])
+                    elif len(parts) >= 4 and parts[0] == "backup":
+                        inferred_table = "_".join(parts[3:])
+
                 backups.append({
                     "backup_id": entry,
                     "backup_type": "database" if is_db_backup else "table",
-                    "database_name": "default",
-                    "table_name": "Full Database" if is_db_backup else entry,
+                    "database_name": inferred_db,
+                    "table_name": inferred_table,
                     "timestamp": fallback_mtime,
                     "size": f"{fallback_size_mb} MB",
                     "total_rows": "N/A",

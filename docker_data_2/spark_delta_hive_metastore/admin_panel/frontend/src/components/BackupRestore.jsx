@@ -590,6 +590,11 @@ export default function BackupRestore() {
                     const val = e.target.value;
                     setSelectedBackupId(val);
                     localStorage.setItem('bdp_selected_backup_id', val);
+                    const matched = backups.find(b => b.backup_id === val);
+                    if (matched) {
+                      if (matched.database_name) setTargetDb(matched.database_name);
+                      if (matched.table_name && matched.backup_type !== 'database') setTargetTable(matched.table_name);
+                    }
                   }}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >

@@ -346,7 +346,10 @@ def restore_table(spark, backup_id, target_db="default", target_table=None, stor
         dest_table = manifest["table"]
     if not dest_table:
         parts = backup_id.split("_")
-        if len(parts) >= 4:
+        if len(parts) >= 5 and parts[0] == "backup":
+            # Format: backup_YYYYMMDD_HHMMSS_db_table... -> extract table from parts[4:]
+            dest_table = "_".join(parts[4:])
+        elif len(parts) >= 4 and parts[0] == "backup":
             dest_table = "_".join(parts[3:])
         else:
             dest_table = backup_id
