@@ -7,8 +7,11 @@ services:
       POSTGRES_USER: hiveuser
       POSTGRES_PASSWORD: hivepassword
     volumes:
+      - ./postgres/postgres-entrypoint.sh:/usr/local/bin/postgres-entrypoint.sh:ro
       - ./postgres/init-hive-metastore.sql:/docker-entrypoint-initdb.d/init-hive-metastore.sql
       - ./postgres/data:/var/lib/postgresql/data
+    entrypoint: ["/usr/local/bin/postgres-entrypoint.sh"]
+    command: ["postgres"]
     ports:
       - "5432:5432"
     networks:
