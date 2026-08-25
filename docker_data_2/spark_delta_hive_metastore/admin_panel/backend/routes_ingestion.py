@@ -225,13 +225,15 @@ def resolve_data_dir():
 
 @router.get("/server-datasets")
 def list_server_datasets():
-    """Lists pre-staged datasets available in /data directory."""
+    """Lists pre-staged datasets available in /data directory (both directories and direct files)."""
     data_dir = resolve_data_dir()
     datasets = []
     if os.path.exists(data_dir):
         for item in os.listdir(data_dir):
+            if item.startswith(".") or item == "README.md":
+                continue
             item_path = os.path.join(data_dir, item)
-            if os.path.isdir(item_path) and not item.startswith("."):
+            if os.path.isdir(item_path):
                 files = [f for f in os.listdir(item_path) if not f.startswith(".")]
                 parquet_files = [f for f in files if f.endswith(".parquet") or f.endswith(".pq")]
                 total_bytes = sum(os.path.getsize(os.path.join(item_path, f)) for f in files if os.path.isfile(os.path.join(item_path, f)))
@@ -242,9 +244,24 @@ def list_server_datasets():
                     "file_count": len(files),
                     "parquet_count": len(parquet_files),
                     "size_mb": mb,
-                    "is_parquet": len(parquet_files) > 0
+                    "is_parquet": len(parquet_files) > 0,
+                    "is_directory": True
                 })
-    return {"datasets": datasets}
+            elif os.path.isfile(item_path):
+                ext = os.path.splitext(item)[1].lower()
+                if ext in [".parquet", ".pq", ".csv", ".json", ".tsv", ".avro"]:
+                    total_bytes = os.path.getsize(item_path)
+                    mb = round(total_bytes / (1024 * 1024), 2)
+                    datasets.append({
+                        "name": item,
+                        "container_path": f"/data/{item}",
+                        "file_count": 1,
+                        "parquet_count": 1 if ext in [".parquet", ".pq"] else 0,
+                        "size_mb": mb,
+                        "is_parquet": ext in [".parquet", ".pq"],
+                        "is_directory": False
+                    })
+    return {"datasets": sorted(datasets, key=lambda x: x["name"].lower())}
 
 @router.get("/dataset-columns/{dataset_name}")
 def get_dataset_columns(dataset_name: str):
@@ -254,11 +271,15 @@ def get_dataset_columns(dataset_name: str):
     if not os.path.exists(ds_path):
         raise HTTPException(status_code=404, detail="Dataset not found")
     
-    files = [f for f in os.listdir(ds_path) if not f.startswith(".") and not f.startswith("_")]
-    if not files:
-        return {"columns": []}
+    sample_file = None
+    if os.path.isdir(ds_path):
+        files = [f for f in os.listdir(ds_path) if not f.startswith(".") and not f.startswith("_")]
+        if not files:
+            return {"columns": []}
+        sample_file = os.path.join(ds_path, files[0])
+    else:
+        sample_file = ds_path
     
-    sample_file = os.path.join(ds_path, files[0])
     columns = []
     try:
         if sample_file.endswith(".parquet") or sample_file.endswith(".pq") or "parquet" in sample_file:
@@ -295,16 +316,19 @@ def submit_server_dataset_ingestion(req: ServerDatasetIngestRequest):
     dataset_fs_path = os.path.join(data_dir, req.dataset_name)
     
     if not os.path.exists(dataset_fs_path):
-        raise HTTPException(status_code=404, detail=f"Dataset folder '{req.dataset_name}' not found in /data.")
+        raise HTTPException(status_code=404, detail=f"Dataset '{req.dataset_name}' not found in /data.")
     
-    files = sorted([
-        f"/data/{req.dataset_name}/{f}"
-        for f in os.listdir(dataset_fs_path)
-        if not f.startswith(".") and not f.startswith("_") and (f.endswith(".parquet") or f.endswith(".csv") or f.endswith(".json"))
-    ])
+    if os.path.isdir(dataset_fs_path):
+        files = sorted([
+            f"/data/{req.dataset_name}/{f}"
+            for f in os.listdir(dataset_fs_path)
+            if not f.startswith(".") and not f.startswith("_") and (f.endswith(".parquet") or f.endswith(".csv") or f.endswith(".json") or f.endswith(".tsv"))
+        ])
+    else:
+        files = [f"/data/{req.dataset_name}"]
     
     if not files:
-        raise HTTPException(status_code=400, detail="No readable Parquet/CSV/JSON files found in dataset folder.")
+        raise HTTPException(status_code=400, detail="No readable Parquet/CSV/JSON files found in dataset.")
     
     total_files = len(files)
     chunk_size = max(10, req.chunk_size)

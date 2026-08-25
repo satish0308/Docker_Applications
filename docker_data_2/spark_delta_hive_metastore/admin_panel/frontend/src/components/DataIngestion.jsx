@@ -572,6 +572,107 @@ export default function DataIngestion() {
             </button>
           </div>
 
+          {/* MODE A: PRE-STAGED SERVER /DATA DATASETS */}
+          {ingestionMode === 'server' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl bg-slate-950/80 border border-sky-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Folder className="w-4 h-4 text-sky-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-white">
+                      Select Pre-Staged Dataset in /data
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchServerDatasets}
+                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 transition"
+                    title="Refresh /data datasets"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {serverDatasets.length === 0 ? (
+                  <div className="p-4 rounded-lg bg-slate-900 border border-white/5 text-center text-xs text-slate-400">
+                    No datasets or files found in <code className="text-sky-300">/data</code>. Mount your host folder to <code className="text-sky-300">./data:/data</code> in docker-compose.yml.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase text-slate-400">Available Server Datasets ({serverDatasets.length})</label>
+                    <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto custom-scrollbar">
+                      {serverDatasets.map(ds => {
+                        const isSelected = selectedDataset === ds.name;
+                        return (
+                          <div
+                            key={ds.name}
+                            onClick={() => handleDatasetChange(ds.name)}
+                            className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                              isSelected
+                                ? 'bg-sky-950/50 border-sky-500 ring-1 ring-sky-500/50 shadow-md'
+                                : 'bg-slate-900/60 border-white/5 hover:border-white/20 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`p-2 rounded-lg ${isSelected ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-400'}`}>
+                                {ds.is_directory ? <Folder className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-white font-mono">{ds.name}</div>
+                                <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                                  <span>{ds.file_count} file{ds.file_count > 1 ? 's' : ''}</span>
+                                  <span>•</span>
+                                  <span className="text-sky-300 font-bold">{ds.size_mb} MB</span>
+                                  {ds.is_parquet && (
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 text-[10px] font-mono border border-amber-500/20">
+                                      Parquet
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MODE B: DIRECT FILE UPLOAD */}
+          {ingestionMode === 'upload' && (
+            <div className="space-y-4">
+              <div className="p-6 rounded-xl bg-slate-950/80 border border-dashed border-sky-500/40 text-center space-y-3">
+                <input
+                  type="file"
+                  id="file-upload"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  accept=".csv,.parquet,.pq,.json,.tsv"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className="cursor-pointer flex flex-col items-center justify-center gap-2 group"
+                >
+                  <div className="p-3 rounded-full bg-sky-500/10 text-sky-400 group-hover:bg-sky-500/20 transition">
+                    <UploadCloud className="w-6 h-6" />
+                  </div>
+                  <div className="text-xs font-bold text-white">
+                    {file ? file.name : "Click to select a data file (.parquet, .csv, .json)"}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB selected` : "Drag and drop or browse from local filesystem"}
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
+
           {/* MODE C: AWS S3 CLOUD STREAM & FILE EXPLORER */}
           {ingestionMode === 's3_stream' && (
             <div className="space-y-4">
