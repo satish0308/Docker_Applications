@@ -911,7 +911,10 @@ def submit_s3_stream_ingestion(req: S3StreamIngestRequest):
     # 1. Resolve source paths
     bucket = req.bucket.strip()
     region = req.aws_region.strip() if req.aws_region else "us-east-1"
-    s3_endpoint = f"s3.{region}.amazonaws.com" if region and region != "us-east-1" else "s3.amazonaws.com"
+    if region == "us-east-1":
+        s3_endpoint = "s3.us-east-1.amazonaws.com"
+    else:
+        s3_endpoint = f"s3.{region}.amazonaws.com"
     
     files_to_read = []
     if req.selected_files and len(req.selected_files) > 0:
@@ -931,16 +934,20 @@ def submit_s3_stream_ingestion(req: S3StreamIngestRequest):
     partition_expr = f".partitionBy({', '.join(part_cols_list)})" if part_cols_list else ""
 
     session_token_config = ""
+    session_token_hconf = ""
     if req.session_token and req.session_token.strip():
         session_token_config = f"""
-    .config("spark.hadoop.fs.s3a.session.token", "{req.session_token.strip()}") \\
-    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider") \\"""
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.session.token", "{req.session_token.strip()}") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.aws.credentials.provider", "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider") \\"""
+        session_token_hconf = f"""
+hconf.set("fs.s3a.bucket.{bucket}.session.token", "{req.session_token.strip()}")
+hconf.set("fs.s3a.bucket.{bucket}.aws.credentials.provider", "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider")"""
 
     chunk_size = max(1, req.chunk_size or 50)
     total_files = len(files_to_read)
     total_chunks = (total_files + chunk_size - 1) // chunk_size if total_files > 0 else 1
 
-    # 2. Build High-Performance AWS S3 Ingestion Spark Script
+    # 2. Build High-Performance AWS S3 Ingestion Spark Script with Per-Bucket S3A Isolation
     spark_script = f"""#!/usr/bin/env python3
 import time
 import re
@@ -950,14 +957,19 @@ from pyspark.sql import functions as F
 
 spark = SparkSession.builder \\
     .appName("AWS_S3_Stream_{req.target_table}") \\
-    .config("spark.hadoop.fs.s3a.access.key", "{req.aws_access_key.strip()}") \\
-    .config("spark.hadoop.fs.s3a.secret.key", "{req.aws_secret_key.strip()}") \\
-    .config("spark.hadoop.fs.s3a.endpoint", "{s3_endpoint}") \\
-    .config("spark.hadoop.fs.s3a.endpoint.region", "{region}") \\
-    .config("spark.hadoop.fs.s3a.path.style.access", "false") \\
-    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true") \\
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
-    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\{session_token_config}
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.endpoint", "{s3_endpoint}") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.endpoint.region", "{region}") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.access.key", "{req.aws_access_key.strip()}") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.secret.key", "{req.aws_secret_key.strip()}") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.path.style.access", "false") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.connection.ssl.enabled", "true") \\
+    .config("spark.hadoop.fs.s3a.bucket.{bucket}.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\{session_token_config}
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.endpoint", "http://minio:9000") \\
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.access.key", "minioadmin") \\
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.secret.key", "minioadmin123") \\
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.path.style.access", "true") \\
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.connection.ssl.enabled", "false") \\
+    .config("spark.hadoop.fs.s3a.bucket.warehouse.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\
     .config("spark.sql.parquet.int96RebaseModeInRead", "CORRECTED") \\
     .config("spark.sql.parquet.int96RebaseModeInWrite", "CORRECTED") \\
     .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED") \\
@@ -966,6 +978,22 @@ spark = SparkSession.builder \\
     .config("spark.sql.avro.datetimeRebaseModeInWrite", "CORRECTED") \\
     .enableHiveSupport() \\
     .getOrCreate()
+
+# Ensure runtime Hadoop Configuration binds multi-bucket routing
+hconf = spark.sparkContext._jsc.hadoopConfiguration()
+hconf.set("fs.s3a.bucket.{bucket}.endpoint", "{s3_endpoint}")
+hconf.set("fs.s3a.bucket.{bucket}.endpoint.region", "{region}")
+hconf.set("fs.s3a.bucket.{bucket}.access.key", "{req.aws_access_key.strip()}")
+hconf.set("fs.s3a.bucket.{bucket}.secret.key", "{req.aws_secret_key.strip()}")
+hconf.set("fs.s3a.bucket.{bucket}.path.style.access", "false")
+hconf.set("fs.s3a.bucket.{bucket}.connection.ssl.enabled", "true")
+hconf.set("fs.s3a.bucket.{bucket}.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider"){session_token_hconf}
+hconf.set("fs.s3a.bucket.warehouse.endpoint", "http://minio:9000")
+hconf.set("fs.s3a.bucket.warehouse.access.key", "minioadmin")
+hconf.set("fs.s3a.bucket.warehouse.secret.key", "minioadmin123")
+hconf.set("fs.s3a.bucket.warehouse.path.style.access", "true")
+hconf.set("fs.s3a.bucket.warehouse.connection.ssl.enabled", "false")
+hconf.set("fs.s3a.bucket.warehouse.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
 t0 = time.time()
 source_paths = {json.dumps(files_to_read)}
