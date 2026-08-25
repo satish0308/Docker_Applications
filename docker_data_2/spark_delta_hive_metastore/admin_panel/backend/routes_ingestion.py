@@ -526,25 +526,25 @@ t0 = time.time()
 print("--> 🚀 [Batch 1/1] Reading /tmp/{filename}...")
 df = {reader_code}
 
-    cleaned_cols = []
-    for c in df.columns:
-        clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
-        clean_c = re.sub(r'_+', '_', clean_c).strip('_')
-        if clean_c and clean_c[0].isdigit():
-            clean_c = f"col_{{clean_c}}"
-        cleaned_cols.append(clean_c if clean_c else "unnamed_col")
-    
-    seen = {{}}
-    deduped = []
-    for c in cleaned_cols:
-        if c in seen:
-            seen[c] += 1
-            deduped.append(f"{{c}}_{{seen[c]}}")
-        else:
-            seen[c] = 0
-            deduped.append(c)
+cleaned_cols = []
+for c in df.columns:
+    clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+    clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+    if clean_c and clean_c[0].isdigit():
+        clean_c = f"col_{{clean_c}}"
+    cleaned_cols.append(clean_c if clean_c else "unnamed_col")
 
-    df = df.toDF(*deduped).coalesce(4)
+seen = {{}}
+deduped = []
+for c in cleaned_cols:
+    if c in seen:
+        seen[c] += 1
+        deduped.append(f"{{c}}_{{seen[c]}}")
+    else:
+        seen[c] = 0
+        deduped.append(c)
+
+df = df.toDF(*deduped).coalesce(4)
 
 row_count = df.count()
 print(f"--> Ingesting {{row_count:,}} rows into '{target_database}.{target_table}' ({table_format})...")
