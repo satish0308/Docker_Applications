@@ -329,6 +329,12 @@ spark = SparkSession.builder \\
     .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \\
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
     .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\
+    .config("spark.sql.parquet.int96RebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.int96RebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInWrite", "CORRECTED") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
@@ -345,7 +351,7 @@ for batch_idx in range(total_batches):
     print(f"\\n--> 🚀 [Batch {{batch_idx+1}}/{{total_batches}}] Reading {{len(batch_files)}} files (Files {{batch_idx*CHUNK_SIZE+1}} to {{min((batch_idx+1)*CHUNK_SIZE, total_files)}})...")
     
     if batch_files[0].endswith(".parquet") or "parquet" in batch_files[0]:
-        df_batch = spark.read.parquet(*batch_files)
+        df_batch = spark.read.option("int96RebaseMode", "CORRECTED").option("datetimeRebaseMode", "CORRECTED").parquet(*batch_files)
     elif batch_files[0].endswith(".json"):
         df_batch = spark.read.json(batch_files)
     else:
@@ -499,7 +505,7 @@ async def submit_ingestion_job(
         # Determine reader code based on file format extension
         fn_lower = filename.lower()
         if fn_lower.endswith(".parquet") or fn_lower.endswith(".pq") or "parquet" in fn_lower:
-            reader_code = f'spark.read.parquet("file:///tmp/{filename}")'
+            reader_code = f'spark.read.option("int96RebaseMode", "CORRECTED").option("datetimeRebaseMode", "CORRECTED").parquet("file:///tmp/{filename}")'
         elif fn_lower.endswith(".json") or fn_lower.endswith(".jsonl"):
             reader_code = f'spark.read.json("file:///tmp/{filename}")'
         else:
@@ -519,6 +525,12 @@ spark = SparkSession.builder \\
     .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \\
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
     .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\
+    .config("spark.sql.parquet.int96RebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.int96RebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInWrite", "CORRECTED") \\
     .enableHiveSupport() \\
     .getOrCreate()
 
