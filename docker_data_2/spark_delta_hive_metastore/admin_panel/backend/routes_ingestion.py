@@ -13,11 +13,15 @@ import glob
 import threading
 import docker
 import pandas as pd
+import io
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import spark_tuning_manager
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
 
 router = APIRouter(prefix="/api/ingestion", tags=["Data Ingestion"])
 
@@ -611,3 +615,468 @@ spark.stop()
         return {"status": "SUCCESS", "job_id": job_id, "message": "Ingestion job launched in background."}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
+
+# ==============================================================================
+# AWS S3 CLOUD DATA STREAM & FILE EXPLORER ROUTER
+# ==============================================================================
+
+class S3ConnectionRequest(BaseModel):
+    aws_access_key: str
+    aws_secret_key: str
+    aws_region: Optional[str] = "us-east-1"
+    session_token: Optional[str] = None
+    bucket: Optional[str] = None
+
+class S3BrowseRequest(BaseModel):
+    aws_access_key: str
+    aws_secret_key: str
+    aws_region: Optional[str] = "us-east-1"
+    session_token: Optional[str] = None
+    bucket: str
+    prefix: Optional[str] = ""
+    delimiter: Optional[str] = "/"
+
+class S3PreviewSchemaRequest(BaseModel):
+    aws_access_key: str
+    aws_secret_key: str
+    aws_region: Optional[str] = "us-east-1"
+    session_token: Optional[str] = None
+    bucket: str
+    key: str
+
+class S3StreamIngestRequest(BaseModel):
+    aws_access_key: str
+    aws_secret_key: str
+    aws_region: Optional[str] = "us-east-1"
+    session_token: Optional[str] = None
+    bucket: str
+    source_prefix: Optional[str] = ""
+    selected_files: Optional[List[str]] = []
+    mode: str = "batch" # "batch" | "stream"
+    target_database: str = "default"
+    target_table: str = "s3_ingested_table"
+    table_format: str = "delta" # "delta" | "parquet"
+    write_mode: str = "append" # "append" | "overwrite"
+    dest_storage: str = "s3" # "s3" | "hdfs"
+    partition_cols: Optional[str] = ""
+    chunk_size: Optional[int] = 50
+    stream_trigger: Optional[str] = "10 seconds"
+
+def get_s3_client(access_key: str, secret_key: str, region: str = "us-east-1", session_token: Optional[str] = None):
+    kwargs = {
+        "aws_access_key_id": access_key.strip(),
+        "aws_secret_access_key": secret_key.strip(),
+        "region_name": region.strip() if region else "us-east-1",
+        "config": Config(
+            signature_version="s3v4",
+            retries={"max_attempts": 3, "mode": "standard"},
+            connect_timeout=10,
+            read_timeout=15
+        )
+    }
+    if session_token and session_token.strip():
+        kwargs["aws_session_token"] = session_token.strip()
+    return boto3.client("s3", **kwargs)
+
+@router.post("/s3/test-connection")
+def test_s3_connection(req: S3ConnectionRequest):
+    """Validates AWS S3 credentials and checks connectivity and bucket access."""
+    if not req.aws_access_key or not req.aws_secret_key:
+        raise HTTPException(status_code=400, detail="AWS Access Key ID and Secret Access Key are required.")
+    
+    try:
+        s3 = get_s3_client(req.aws_access_key, req.aws_secret_key, req.aws_region, req.session_token)
+        
+        if req.bucket and req.bucket.strip():
+            bucket_name = req.bucket.strip()
+            # Test specific bucket access
+            s3.head_bucket(Bucket=bucket_name)
+            return {
+                "status": "SUCCESS",
+                "message": f"Successfully connected to AWS S3 bucket '{bucket_name}' in region '{req.aws_region or 'us-east-1'}'.",
+                "bucket": bucket_name,
+                "region": req.aws_region or "us-east-1"
+            }
+        else:
+            # List available buckets
+            res = s3.list_buckets()
+            buckets = [b["Name"] for b in res.get("Buckets", [])]
+            return {
+                "status": "SUCCESS",
+                "message": f"AWS S3 Authentication verified successfully. Found {len(buckets)} available bucket(s).",
+                "buckets": buckets,
+                "region": req.aws_region or "us-east-1"
+            }
+    except ClientError as ex:
+        err_code = ex.response.get("Error", {}).get("Code", "ClientError")
+        err_msg = ex.response.get("Error", {}).get("Message", str(ex))
+        raise HTTPException(status_code=400, detail=f"AWS S3 Error [{err_code}]: {err_msg}")
+    except (NoCredentialsError, PartialCredentialsError) as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid AWS Credentials: {ex}")
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"S3 Connection Failed: {str(ex)}")
+
+@router.post("/s3/list-buckets")
+def list_s3_buckets(req: S3ConnectionRequest):
+    """Returns list of accessible AWS S3 buckets for the given credentials."""
+    if not req.aws_access_key or not req.aws_secret_key:
+        raise HTTPException(status_code=400, detail="AWS Access Key ID and Secret Access Key are required.")
+    
+    try:
+        s3 = get_s3_client(req.aws_access_key, req.aws_secret_key, req.aws_region, req.session_token)
+        res = s3.list_buckets()
+        buckets = [b["Name"] for b in res.get("Buckets", [])]
+        return {"status": "SUCCESS", "buckets": buckets}
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Failed to list S3 buckets: {str(ex)}")
+
+@router.post("/s3/browse")
+def browse_s3_folder(req: S3BrowseRequest):
+    """
+    Browses folders and files in an AWS S3 bucket under a given prefix.
+    Returns subdirectories (common prefixes) and files with size, timestamp, and format detection.
+    """
+    if not req.aws_access_key or not req.aws_secret_key or not req.bucket:
+        raise HTTPException(status_code=400, detail="Access Key, Secret Key, and Bucket Name are required.")
+    
+    try:
+        s3 = get_s3_client(req.aws_access_key, req.aws_secret_key, req.aws_region, req.session_token)
+        
+        prefix = (req.prefix or "").strip()
+        if prefix and not prefix.endswith("/"):
+            prefix += "/"
+        if prefix == "/":
+            prefix = ""
+        
+        delimiter = req.delimiter or "/"
+        
+        paginator = s3.get_paginator('list_objects_v2')
+        page_iterator = paginator.paginate(
+            Bucket=req.bucket.strip(),
+            Prefix=prefix,
+            Delimiter=delimiter,
+            PaginationConfig={'MaxItems': 1000, 'PageSize': 1000}
+        )
+
+        folders = []
+        files = []
+        total_size_bytes = 0
+
+        for page in page_iterator:
+            # 1. Subfolders (CommonPrefixes)
+            for cp in page.get("CommonPrefixes", []):
+                p_str = cp.get("Prefix", "")
+                f_name = p_str[len(prefix):].rstrip("/")
+                if f_name:
+                    folders.append({
+                        "name": f_name,
+                        "prefix": p_str,
+                        "type": "folder"
+                    })
+            
+            # 2. Files (Contents)
+            for obj in page.get("Contents", []):
+                key = obj.get("Key", "")
+                if key == prefix:
+                    # Skip directory marker object
+                    continue
+                
+                f_name = key[len(prefix):]
+                if not f_name:
+                    continue
+                
+                size = obj.get("Size", 0)
+                total_size_bytes += size
+                last_mod = obj.get("LastModified")
+                last_mod_str = last_mod.strftime("%Y-%m-%d %H:%M:%S") if last_mod else "N/A"
+                
+                # Format detection
+                fn_lower = f_name.lower()
+                fmt = "other"
+                if fn_lower.endswith(".parquet") or fn_lower.endswith(".pq") or "parquet" in fn_lower:
+                    fmt = "parquet"
+                elif fn_lower.endswith(".csv") or fn_lower.endswith(".tsv"):
+                    fmt = "csv"
+                elif fn_lower.endswith(".json") or fn_lower.endswith(".jsonl"):
+                    fmt = "json"
+                elif fn_lower.endswith(".avro"):
+                    fmt = "avro"
+                elif fn_lower.endswith(".gz") or fn_lower.endswith(".snappy"):
+                    fmt = "compressed"
+
+                # Formatted size string
+                if size >= 1024 * 1024 * 1024:
+                    fmt_size = f"{size / (1024 * 1024 * 1024):.2f} GB"
+                elif size >= 1024 * 1024:
+                    fmt_size = f"{size / (1024 * 1024):.2f} MB"
+                elif size >= 1024:
+                    fmt_size = f"{size / 1024:.2f} KB"
+                else:
+                    fmt_size = f"{size} B"
+
+                files.append({
+                    "key": key,
+                    "name": f_name,
+                    "size_bytes": size,
+                    "size_formatted": fmt_size,
+                    "last_modified": last_mod_str,
+                    "format": fmt
+                })
+
+        # Calculate parent prefix for navigation
+        parent_prefix = ""
+        if prefix:
+            stripped = prefix.rstrip("/")
+            last_slash = stripped.rfind("/")
+            if last_slash >= 0:
+                parent_prefix = stripped[:last_slash + 1]
+            else:
+                parent_prefix = ""
+
+        return {
+            "status": "SUCCESS",
+            "bucket": req.bucket.strip(),
+            "current_prefix": prefix,
+            "parent_prefix": parent_prefix,
+            "folders": sorted(folders, key=lambda x: x["name"].lower()),
+            "files": sorted(files, key=lambda x: x["name"].lower()),
+            "total_folders": len(folders),
+            "total_files": len(files),
+            "total_size_mb": round(total_size_bytes / (1024 * 1024), 2)
+        }
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Failed to browse S3 prefix '{req.prefix}': {str(ex)}")
+
+@router.post("/s3/preview-schema")
+def preview_s3_schema(req: S3PreviewSchemaRequest):
+    """Downloads a small slice of an S3 object to inspect and detect columns and schema."""
+    if not req.aws_access_key or not req.aws_secret_key or not req.bucket or not req.key:
+        raise HTTPException(status_code=400, detail="Missing required parameters for S3 preview.")
+    
+    try:
+        s3 = get_s3_client(req.aws_access_key, req.aws_secret_key, req.aws_region, req.session_token)
+        
+        # Read up to 5MB sample for schema detection
+        resp = s3.get_object(Bucket=req.bucket.strip(), Key=req.key.strip(), Range="bytes=0-5242880")
+        raw_bytes = resp["Body"].read()
+        
+        key_lower = req.key.lower()
+        columns = []
+        preview_rows = []
+        detected_format = "unknown"
+
+        if key_lower.endswith(".parquet") or key_lower.endswith(".pq") or "parquet" in key_lower:
+            detected_format = "parquet"
+            import pyarrow.parquet as pq
+            reader = pq.ParquetFile(io.BytesIO(raw_bytes))
+            columns = reader.schema.names
+            tbl = reader.read_row_group(0)
+            df = tbl.to_pandas().head(10)
+            preview_rows = df.astype(str).to_dict(orient="records")
+        elif key_lower.endswith(".json") or key_lower.endswith(".jsonl"):
+            detected_format = "json"
+            df = pd.read_json(io.BytesIO(raw_bytes), lines=True, nrows=10)
+            columns = list(df.columns)
+            preview_rows = df.astype(str).to_dict(orient="records")
+        else:
+            detected_format = "csv"
+            df = pd.read_csv(io.BytesIO(raw_bytes), nrows=10)
+            columns = list(df.columns)
+            preview_rows = df.astype(str).to_dict(orient="records")
+
+        return {
+            "status": "SUCCESS",
+            "key": req.key,
+            "format": detected_format,
+            "columns": columns,
+            "preview_rows": preview_rows[:10]
+        }
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Failed to preview S3 schema: {str(ex)}")
+
+@router.post("/s3/submit-stream")
+def submit_s3_stream_ingestion(req: S3StreamIngestRequest):
+    """
+    Submits a high-performance Spark AWS S3 Stream / Batch Ingestion job.
+    Directly streams or loads files from AWS S3 (s3a://) into Delta Lake or Parquet Lakehouse tables.
+    """
+    if not req.aws_access_key or not req.aws_secret_key or not req.bucket:
+        raise HTTPException(status_code=400, detail="AWS Access Key, Secret Key, and Bucket Name are required.")
+    
+    if not req.target_table:
+        raise HTTPException(status_code=400, detail="Target table name is required.")
+    
+    job_id = f"s3_stream_{req.target_table}_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+    
+    # 1. Resolve source paths
+    bucket = req.bucket.strip()
+    region = req.aws_region.strip() if req.aws_region else "us-east-1"
+    s3_endpoint = f"s3.{region}.amazonaws.com" if region and region != "us-east-1" else "s3.amazonaws.com"
+    
+    files_to_read = []
+    if req.selected_files and len(req.selected_files) > 0:
+        files_to_read = [f"s3a://{bucket}/{k.lstrip('/')}" for k in req.selected_files]
+    else:
+        prefix_clean = (req.source_prefix or "").strip().rstrip("/")
+        if prefix_clean:
+            files_to_read = [f"s3a://{bucket}/{prefix_clean}/"]
+        else:
+            files_to_read = [f"s3a://{bucket}/"]
+
+    is_s3_dest = req.dest_storage == "s3"
+    dest_path = f"s3a://warehouse/{req.target_table}/" if is_s3_dest else f"hdfs://namenode:9000/user/hive/warehouse/{req.target_table}/"
+    is_delta = req.table_format == "delta"
+
+    part_cols_list = [f'"{c.strip()}"' for c in (req.partition_cols or "").split(",") if c.strip()]
+    partition_expr = f".partitionBy({', '.join(part_cols_list)})" if part_cols_list else ""
+
+    session_token_config = ""
+    if req.session_token and req.session_token.strip():
+        session_token_config = f"""
+    .config("spark.hadoop.fs.s3a.session.token", "{req.session_token.strip()}") \\
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider") \\"""
+
+    chunk_size = max(1, req.chunk_size or 50)
+    total_files = len(files_to_read)
+    total_chunks = (total_files + chunk_size - 1) // chunk_size if total_files > 0 else 1
+
+    # 2. Build High-Performance AWS S3 Ingestion Spark Script
+    spark_script = f"""#!/usr/bin/env python3
+import time
+import re
+import json
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+
+spark = SparkSession.builder \\
+    .appName("AWS_S3_Stream_{req.target_table}") \\
+    .config("spark.hadoop.fs.s3a.access.key", "{req.aws_access_key.strip()}") \\
+    .config("spark.hadoop.fs.s3a.secret.key", "{req.aws_secret_key.strip()}") \\
+    .config("spark.hadoop.fs.s3a.endpoint", "{s3_endpoint}") \\
+    .config("spark.hadoop.fs.s3a.endpoint.region", "{region}") \\
+    .config("spark.hadoop.fs.s3a.path.style.access", "false") \\
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true") \\
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \\{session_token_config}
+    .config("spark.sql.parquet.int96RebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.int96RebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.parquet.datetimeRebaseModeInWrite", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInRead", "CORRECTED") \\
+    .config("spark.sql.avro.datetimeRebaseModeInWrite", "CORRECTED") \\
+    .enableHiveSupport() \\
+    .getOrCreate()
+
+t0 = time.time()
+source_paths = {json.dumps(files_to_read)}
+total_files = len(source_paths)
+CHUNK_SIZE = {chunk_size}
+total_batches = (total_files + CHUNK_SIZE - 1) // CHUNK_SIZE if total_files > 0 else 1
+total_rows_ingested = 0
+
+print(f"======================================================================")
+print(f"☁️  [AWS S3 Ingestion Engine] Streaming from s3://{bucket}/ to `{req.target_database}.{req.target_table}` ({req.table_format})")
+print(f"📦 Total S3 Target Items: {{total_files}} | Batch Size: {{CHUNK_SIZE}}")
+print(f"======================================================================\\n")
+
+for batch_idx in range(total_batches):
+    batch_files = source_paths[batch_idx * CHUNK_SIZE : (batch_idx + 1) * CHUNK_SIZE]
+    print(f"\\n--> 🚀 [Batch {{batch_idx+1}}/{{total_batches}}] Reading {{len(batch_files)}} AWS S3 object(s)...")
+    
+    first_path = batch_files[0].lower()
+    if first_path.endswith(".parquet") or "parquet" in first_path or first_path.endswith(".pq"):
+        df_batch = spark.read.option("int96RebaseMode", "CORRECTED").option("datetimeRebaseMode", "CORRECTED").parquet(*batch_files)
+    elif first_path.endswith(".json") or first_path.endswith(".jsonl"):
+        df_batch = spark.read.json(batch_files)
+    elif first_path.endswith(".csv") or first_path.endswith(".tsv"):
+        df_batch = spark.read.option("header", "true").option("inferSchema", "true").csv(batch_files)
+    else:
+        try:
+            df_batch = spark.read.parquet(*batch_files)
+        except Exception:
+            df_batch = spark.read.option("header", "true").option("inferSchema", "true").csv(batch_files)
+
+    cleaned_cols = []
+    for c in df_batch.columns:
+        clean_c = re.sub(r'[^a-zA-Z0-9_]', '_', c.strip()).lower()
+        clean_c = re.sub(r'_+', '_', clean_c).strip('_')
+        if clean_c and clean_c[0].isdigit():
+            clean_c = f"col_{{clean_c}}"
+        cleaned_cols.append(clean_c if clean_c else "unnamed_col")
+    
+    seen = {{}}
+    deduped = []
+    for c in cleaned_cols:
+        if c in seen:
+            seen[c] += 1
+            deduped.append(f"{{c}}_{{seen[c]}}")
+        else:
+            seen[c] = 0
+            deduped.append(c)
+
+    df_batch = df_batch.toDF(*deduped).coalesce(4)
+    batch_row_count = df_batch.count()
+    total_rows_ingested += batch_row_count
+
+    mode_to_use = "{req.write_mode}" if batch_idx == 0 else "append"
+
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {req.target_database}")
+
+    if {is_delta}:
+        writer = df_batch.write.format("delta").mode(mode_to_use){partition_expr}
+        if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+            writer.option("path", "{dest_path}")
+        writer.saveAsTable("{req.target_database}.{req.target_table}")
+    else:
+        writer = df_batch.write.format("parquet").mode(mode_to_use){partition_expr}
+        if "{dest_path}".startswith("s3a://") or "{dest_path}".startswith("hdfs://"):
+            writer.option("path", "{dest_path}")
+        writer.saveAsTable("{req.target_database}.{req.target_table}")
+
+    print(f"--> ✅ [Batch {{batch_idx+1}}/{{total_batches}}] Committed {{batch_row_count:,}} rows from AWS S3.")
+
+elapsed = time.time() - t0
+print(f"\\n🏆 AWS S3 Ingestion Complete: {{total_rows_ingested:,}} total rows streamed in {{elapsed:.2f}}s")
+print(f"__RESULT_SUCCESS__|{{total_rows_ingested}}|{{elapsed:.2f}}")
+spark.stop()
+"""
+
+    tuning_cfg = spark_tuning_manager.load_tuning_config()
+    params = tuning_cfg.get("params", spark_tuning_manager.PROFILES.get("🟢 Light (Small Files / Interactive)"))
+
+    job_record = {
+        "job_id": job_id,
+        "source_type": "AWS S3 Cloud Stream",
+        "s3_bucket": bucket,
+        "s3_prefix": req.source_prefix or "/",
+        "target_database": req.target_database,
+        "target_table": req.target_table,
+        "format": req.table_format,
+        "write_mode": req.write_mode,
+        "dest_storage": req.dest_storage,
+        "total_source_files": total_files,
+        "total_chunks": total_chunks,
+        "current_chunk": 0,
+        "partition_cols": req.partition_cols or "",
+        "status": "QUEUED",
+        "progress_pct": 5,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "current_batch_msg": f"Job submitted. Streaming from s3://{bucket}/..."
+    }
+    jobs = load_ingestion_jobs()
+    jobs.insert(0, job_record)
+    save_ingestion_jobs(jobs)
+
+    t = threading.Thread(
+        target=run_chunked_ingestion_job_thread,
+        args=(job_id, spark_script, f"script_{job_id}.py", params, total_chunks),
+        daemon=True
+    )
+    t.start()
+
+    return {
+        "status": "SUCCESS",
+        "job_id": job_id,
+        "message": f"AWS S3 Cloud Stream job '{job_id}' launched in background."
+    }
+
