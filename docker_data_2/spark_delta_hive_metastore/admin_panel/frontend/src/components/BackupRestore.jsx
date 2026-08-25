@@ -49,8 +49,10 @@ export default function BackupRestore() {
   const [retentionLimit, setRetentionLimit] = useState(3);
   const [submittingBackup, setSubmittingBackup] = useState(false);
 
-  // Restore Form State
-  const [selectedBackupId, setSelectedBackupId] = useState('');
+  // Restore Form State with localStorage persistence
+  const [selectedBackupId, setSelectedBackupId] = useState(() => {
+    return localStorage.getItem('bdp_selected_backup_id') || '';
+  });
   const [targetDb, setTargetDb] = useState('default');
   const [targetTable, setTargetTable] = useState('');
   const [storageDest, setStorageDest] = useState('s3a://warehouse/');
@@ -83,21 +85,36 @@ export default function BackupRestore() {
     }
   };
 
-  const fetchBackups = async () => {
-    setLoading(true);
+  const fetchBackups = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       await fetchCatalog();
       const res = await fetch('/api/backup/list');
       const data = await res.json();
       const bList = data.backups || [];
       setBackups(bList);
-      if (bList.length > 0 && !selectedBackupId) {
-        setSelectedBackupId(bList[0].backup_id || '');
-      }
+      
+      setSelectedBackupId(current => {
+        // 1. If currently selected backup exists in the latest list, retain it!
+        if (current && bList.some(b => b.backup_id === current)) {
+          return current;
+        }
+        // 2. Check localStorage saved selection
+        const saved = localStorage.getItem('bdp_selected_backup_id');
+        if (saved && bList.some(b => b.backup_id === saved)) {
+          return saved;
+        }
+        // 3. Default to first backup if none selected
+        const fallback = bList.length > 0 ? (bList[0].backup_id || '') : '';
+        if (fallback) {
+          localStorage.setItem('bdp_selected_backup_id', fallback);
+        }
+        return fallback;
+      });
     } catch (err) {
       console.error("Failed to fetch backups:", err);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -569,7 +586,11 @@ export default function BackupRestore() {
                 </label>
                 <select
                   value={selectedBackupId}
-                  onChange={(e) => setSelectedBackupId(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedBackupId(val);
+                    localStorage.setItem('bdp_selected_backup_id', val);
+                  }}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                 >
                   {backups.length === 0 ? (
@@ -700,6 +721,26 @@ export default function BackupRestore() {
                         <Calendar className="w-3 h-3 text-slate-500" />
                         {b.timestamp}
                       </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                      <button
+                        onClick={() => {
+                          setSelectedBackupId(b.backup_id);
+                          localStorage.setItem('bdp_selected_backup_id', b.backup_id);
+                          if (b.database_name) setTargetDb(b.database_name);
+                          if (b.table_name && b.backup_type !== 'database') setTargetTable(b.table_name);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className={`w-full py-1.5 px-3 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1.5 ${
+                          selectedBackupId === b.backup_id
+                            ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20'
+                            : 'bg-slate-800 hover:bg-sky-600/30 text-sky-300 border border-white/10'
+                        }`}
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        {selectedBackupId === b.backup_id ? '✓ Selected for Restore' : 'Select for Restore'}
+                      </button>
                     </div>
                   </div>
                 ))}
