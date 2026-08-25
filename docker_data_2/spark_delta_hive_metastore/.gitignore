@@ -44,10 +44,20 @@ env/
 
 # Runtime Admin Panel state & telemetry
 admin_panel/*_jobs.json
+admin_panel/*_schedules.json
+admin_panel/backup_schedules.json
 admin_panel/spark_tuning_config.json
 admin_panel/admin_panel/
 python_scripts/spark_tuning_config.json
 spark_tuning_config.json
+
+# Secrets & Credentials
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+aws_credentials.json
 
 # IDE & OS files
 .idea/
