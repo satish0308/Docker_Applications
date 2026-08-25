@@ -120,7 +120,7 @@ services:
   hue:
     image: gethue/hue:latest
     container_name: hue
-    command: /usr/share/hue/build/env/bin/supervisor
+    command: bash -c "/usr/share/hue/build/env/bin/hue migrate --no-input || true; exec /usr/share/hue/build/env/bin/supervisor"
     environment:
       - TMPDIR=/tmp
       - HUE_CONF_DIR=/usr/share/hue/desktop/conf
